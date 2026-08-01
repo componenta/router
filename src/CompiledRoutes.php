@@ -238,9 +238,16 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         if (isset($this->dynamicChunks[$method])) {
             $prefix = ($p = strpos($uri, '/', 1)) !== false ? substr($uri, 1, $p - 1) : substr($uri, 1);
 
-            $chunksToSearch = $this->prefixIndex[$method][$prefix]
-                ?? $this->prefixIndex[$method]['*']
-                ?? array_keys($this->dynamicChunks[$method]);
+            $chunksToSearch = array_values(array_unique([
+                ...($this->prefixIndex[$method][$prefix] ?? []),
+                ...($this->prefixIndex[$method]['*'] ?? []),
+            ]));
+
+            if ($chunksToSearch === []) {
+                $chunksToSearch = array_keys($this->dynamicChunks[$method]);
+            } else {
+                sort($chunksToSearch);
+            }
 
             foreach ($chunksToSearch as $chunkIndex) {
                 if (!isset($this->dynamicChunks[$method][$chunkIndex])) {
