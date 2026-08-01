@@ -69,14 +69,11 @@ final class RouteCacheGenerator
             ];
 
             $parameterNames = $compiled->parameterNames();
-            $parameterTokens = $parameterNames === []
-                ? []
-                : array_intersect_key($compiled->tokens, array_flip($parameterNames));
 
             $optional = [
                 'methods' => $route->methods === [HttpMethod::GET] ? null : $route->methods,
                 'middlewares' => $route->middlewares?->toArray() ?: null,
-                'tokens' => $parameterTokens ?: null,
+                'tokens' => $compiled->tokens ?: null,
                 'defaults' => $compiled->defaults ?: null,
                 'paramNames' => $parameterNames ?: null,
                 'optionalParams' => $compiled->optionalParameters ?: null,

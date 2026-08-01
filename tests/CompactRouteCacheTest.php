@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Componenta\Http\Router\Cache\RouteCacheGenerator;
 use Componenta\Http\Router\CompiledRoutes;
+use Componenta\Http\Router\Compiler;
 use Componenta\Http\Router\RouteRecord;
 use Componenta\Http\Router\Routes;
 
@@ -14,6 +15,7 @@ it('stores compact route references and restores omitted defaults', function () 
     $routes->addRoute(RouteRecord::get('users.show', '/users/{id}', 'ShowUserController'));
 
     $data = (new RouteCacheGenerator())->compile($routes);
+    $compiler = new Compiler();
 
     expect($data['staticRoutes']['GET']['/'])->toBe('home.compact')
         ->and($data['staticRoutes']['POST']['/posts'])->toBe('posts.create')
@@ -21,9 +23,12 @@ it('stores compact route references and restores omitted defaults', function () 
         ->and($data['routeData']['home.compact'])->toBe([
             'path' => '/',
             'handler' => 'HomeController',
+            'tokens' => $compiler->compile('/')->tokens,
         ])
         ->and($data['routeData']['posts.create']['methods'])->toBe(['POST'])
-        ->and($data['routeData']['users.show']['tokens'])->toBe(['id' => '\\d+']);
+        ->and($data['routeData']['users.show']['tokens'])->toBe(
+            $compiler->compile('/users/{id}')->tokens,
+        );
 
     $file = tempnam(sys_get_temp_dir(), 'componenta_routes_');
     file_put_contents($file, '<?php return ' . var_export($data, true) . ';');
