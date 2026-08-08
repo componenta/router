@@ -20,6 +20,8 @@ use Componenta\VarExport\Export;
  */
 final class RouteCacheGenerator
 {
+    public const int CACHE_VERSION = 2;
+
     private const int REGEX_LIMIT = 5000;
     private const int CHUNK_SIZE = 50;
     private const int MAX_REGEX_SIZE = 900_000;
@@ -48,13 +50,14 @@ final class RouteCacheGenerator
      * Separates static and dynamic routes, chooses optimal storage strategy.
      *
      * @param RouteCollectorInterface $routes Routes to compile
-     * @return array{staticRoutes: array, routeData: array, regex?: array, routeMap?: array, dynamicChunks?: array, prefixIndex?: array}
+     * @return array{version?: int, staticRoutes?: array, routeData?: array, regex?: array, routeMap?: array, dynamicChunks?: array, prefixIndex?: array, defaultTokens?: array}
      */
     public function compile(RouteCollectorInterface $routes): array
     {
         $staticRoutes = [];
         $dynamicRoutes = [];
         $routeData = [];
+        $defaultTokens = $this->compiler->compile('/')->tokens;
 
         foreach ($routes as $route) {
             $compiled = $this->compiler->compile(
@@ -73,7 +76,7 @@ final class RouteCacheGenerator
             $optional = [
                 'methods' => $route->methods === [HttpMethod::GET] ? null : $route->methods,
                 'middlewares' => $route->middlewares?->toArray() ?: null,
-                'tokens' => $compiled->tokens ?: null,
+                'tokens' => array_diff_assoc($compiled->tokens, $defaultTokens) ?: null,
                 'defaults' => $compiled->defaults ?: null,
                 'paramNames' => $parameterNames ?: null,
                 'optionalParams' => $compiled->optionalParameters ?: null,
@@ -108,11 +111,39 @@ final class RouteCacheGenerator
         if ($totalDynamic <= self::REGEX_LIMIT) {
             $unifiedCache = $this->tryBuildUnifiedRegexCache($staticRoutes, $dynamicRoutes, $routeData);
             if ($unifiedCache !== null) {
-                return $unifiedCache;
+                return $this->compactCache($unifiedCache, $defaultTokens);
             }
         }
 
-        return $this->buildChunkedCache($staticRoutes, $dynamicRoutes, $routeData);
+        return $this->compactCache(
+            $this->buildChunkedCache($staticRoutes, $dynamicRoutes, $routeData),
+            $defaultTokens,
+        );
+    }
+
+    /**
+     * @param array<string, array> $cache
+     * @param array<string, string> $defaultTokens
+     * @return array<string, array|int>
+     */
+    private function compactCache(array $cache, array $defaultTokens): array
+    {
+        $cache = array_filter(
+            $cache,
+            static fn (array $section): bool => $section !== [],
+        );
+
+        if ($cache === []) {
+            return [];
+        }
+
+        $cache = ['version' => self::CACHE_VERSION, ...$cache];
+
+        if ($defaultTokens !== CompilerInterface::DEFAULT_PATTERNS) {
+            $cache['defaultTokens'] = $defaultTokens;
+        }
+
+        return $cache;
     }
 
     private function getFirstSegment(string $path): string

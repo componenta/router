@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Componenta\Http\Router;
 
 use Componenta\Http\Middleware\MiddlewareGroup;
+use Componenta\Http\Router\Cache\RouteCacheGenerator;
 use Componenta\Http\Router\Contract\CompilerInterface;
 use Componenta\Http\Router\Contract\GeneratorInterface;
 use Componenta\Http\Router\Contract\MatcherInterface;
@@ -48,6 +49,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         private readonly array $routeMap,
         private readonly array $dynamicChunks,
         private readonly array $prefixIndex,
+        private readonly array $defaultTokens,
         private readonly array $routeData,
     ) {
         $this->syntax = new ColonSyntax();
@@ -129,6 +131,18 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         return ['name' => $name] + $this->routeData[$name];
     }
 
+    /** @return array{name: string, path: string, handler: mixed, tokens: array} */
+    private function routeRecordDataFor(string $name): array
+    {
+        $data = $this->routeDataFor($name);
+        $data['tokens'] = [
+            ...$this->defaultTokens,
+            ...($data['tokens'] ?? []),
+        ];
+
+        return $data;
+    }
+
     /**
      * Create instance from cache file.
      *
@@ -139,12 +153,15 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         $data = require $cacheFile;
 
         return new self(
-            $data['staticRoutes'],
+            $data['staticRoutes'] ?? [],
             $data['regex'] ?? [],
             $data['routeMap'] ?? [],
             $data['dynamicChunks'] ?? [],
             $data['prefixIndex'] ?? [],
-            $data['routeData'],
+            ($data['version'] ?? null) === RouteCacheGenerator::CACHE_VERSION
+                ? ($data['defaultTokens'] ?? CompilerInterface::DEFAULT_PATTERNS)
+                : [],
+            $data['routeData'] ?? [],
         );
     }
 
@@ -382,7 +399,10 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         return $this->syntax->buildPath(
             $d['path'],
             $parameters + ($d['defaults'] ?? []),
-            $d['tokens'] ?? [],
+            [
+                ...$this->defaultTokens,
+                ...($d['tokens'] ?? []),
+            ],
             $d['optionalParams'] ?? [],
             $name
         );
@@ -439,7 +459,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             throw new RouteNotRegisteredException($name);
         }
 
-        return RouteRecord::fromArray($this->routeDataFor($name));
+        return RouteRecord::fromArray($this->routeRecordDataFor($name));
     }
 
     /**
@@ -450,7 +470,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     public function getIterator(): Generator
     {
         foreach ($this->routeData as $name => $data) {
-            yield $name => RouteRecord::fromArray($this->routeDataFor($name));
+            yield $name => RouteRecord::fromArray($this->routeRecordDataFor($name));
         }
     }
 
@@ -471,7 +491,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     {
         $routes = [];
         foreach ($this->routeData as $name => $_) {
-            $routes[$name] = RouteRecord::fromArray($this->routeDataFor($name));
+            $routes[$name] = RouteRecord::fromArray($this->routeRecordDataFor($name));
         }
 
         return $routes;
