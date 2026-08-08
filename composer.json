@@ -6,7 +6,7 @@
     "require": {
         "php": "^8.4",
         "componenta/arrayable": "^1.0",
-        "componenta/config": "^1.0",
+        "componenta/config": "^2.0",
         "componenta/di": "^2.0.1",
         "componenta/http-responder": "^1.0",
         "componenta/middleware-factory": "^1.0",
