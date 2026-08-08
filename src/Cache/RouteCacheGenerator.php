@@ -64,17 +64,27 @@ final class RouteCacheGenerator
             );
 
             $data = [
-                'name' => $route->name,
                 'path' => $this->converter->toColonSyntax($route->path),
                 'handler' => $route->handler->value,
-                'methods' => $route->methods,
-                'middlewares' => $route->middlewares?->toArray() ?? [],
-                'tokens' => $compiled->tokens,
-                'defaults' => $compiled->defaults,
-                'paramNames' => $compiled->parameterNames(),
-                'optionalParams' => $compiled->optionalParameters,
+            ];
+
+            $parameterNames = $compiled->parameterNames();
+
+            $optional = [
+                'methods' => $route->methods === [HttpMethod::GET] ? null : $route->methods,
+                'middlewares' => $route->middlewares?->toArray() ?: null,
+                'tokens' => $compiled->tokens ?: null,
+                'defaults' => $compiled->defaults ?: null,
+                'paramNames' => $parameterNames ?: null,
+                'optionalParams' => $compiled->optionalParameters ?: null,
                 'group' => $route->group,
             ];
+
+            foreach ($optional as $key => $value) {
+                if ($value !== null) {
+                    $data[$key] = $value;
+                }
+            }
 
             $routeData[$route->name] = $data;
 
@@ -83,12 +93,12 @@ final class RouteCacheGenerator
 
                 if ($compiled->hasParameters()) {
                     $dynamicRoutes[$method][] = [
-                        'data' => $data,
+                        'route' => $route->name,
                         'compiled' => $compiled,
                         'prefix' => $this->getFirstSegment($route->path),
                     ];
                 } else {
-                    $staticRoutes[$method][$route->path] = $data;
+                    $staticRoutes[$method][$route->path] = $route->name;
                 }
             }
         }
@@ -209,7 +219,7 @@ final class RouteCacheGenerator
         foreach ($routes as $index => $routeInfo) {
             $mark = 'r' . $index;
             $patterns[] = '(' . $routeInfo['compiled']->regex . ')(*MARK:' . $mark . ')';
-            $routeMap[$mark] = $routeInfo['data'];
+            $routeMap[$mark] = $routeInfo['route'];
         }
 
         return ['#^(?:' . implode('|', $patterns) . ')$#J', $routeMap];

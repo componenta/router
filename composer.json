@@ -7,7 +7,7 @@
         "php": "^8.4",
         "componenta/arrayable": "^1.0",
         "componenta/config": "^1.0",
-        "componenta/di": "^1.0",
+        "componenta/di": "^2.0",
         "componenta/http-responder": "^1.0",
         "componenta/middleware-factory": "^1.0",
         "componenta/path-resolver": "^1.0",
@@ -34,5 +34,18 @@
                 "Componenta\\Http\\Router\\ConfigProvider"
             ]
         }
+    },
+    "require-dev": {
+        "pestphp/pest": "^4.0",
+        "nyholm/psr7": "^1.8"
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        },
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "@php vendor/bin/pest"
     }
 }
