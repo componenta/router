@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Componenta\Http\Router\Factory;
 
 use Componenta\Config\Config;
+use Componenta\Config\ContainerValue;
 use Componenta\Http\Middleware\MiddlewareFactory;
 use Componenta\Http\Router\ConfigKey;
 use Componenta\Http\Router\Middleware\DispatchRouteMiddleware;
@@ -13,10 +14,10 @@ use Psr\Container\ContainerInterface;
 
 final readonly class DispatchRouteMiddlewareFactory
 {
-    public function __invoke(ContainerInterface $container): DispatchRouteMiddleware
+    public function __invoke(ContainerValue $container): DispatchRouteMiddleware
     {
         /** @var Config $config */
-        $config = $container->get(ConfigKey::CONFIG);
+        $config = $container->config;
 
         $middlewareFactory = $container->get(MiddlewareFactory::class);
 

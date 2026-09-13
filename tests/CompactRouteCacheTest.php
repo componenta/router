@@ -21,7 +21,7 @@ it('stores compact route references and restores omitted defaults', function () 
         ->and($data['staticRoutes']['GET']['/'])->toBe('home.compact')
         ->and($data['staticRoutes']['POST']['/posts'])->toBe('posts.create')
         ->and($data['routeMap']['GET']['r0'])->toBe('users.show')
-        ->and($data['routeData']['home.compact'])->toBe([
+        ->and($data['routeData']['home.compact'])->toMatchArray([
             'path' => '/',
             'handler' => 'HomeController',
         ])
@@ -37,7 +37,7 @@ it('stores compact route references and restores omitted defaults', function () 
 
         expect($compiled->match($compiled, '/', 'GET')->name)->toBe('home.compact')
             ->and($compiled->getRoute('home.compact')->methods)->toBe(['GET'])
-            ->and($compiled->getRoute('home.compact')->tokens)->toBe($compiler->compile('/')->tokens)
+            ->and($compiled->getRoute('home.compact')->tokens)->toBe($routes->getRoute('home.compact')->tokens)
             ->and($compiled->getRoute('home.compact')->middlewares)->toBeNull()
             ->and($compiled->getRoute('posts.create')->methods)->toBe(['POST'])
             ->and($compiled->match($compiled, '/users/42', 'GET')->parameters)->toBe(['id' => 42])
@@ -59,7 +59,7 @@ it('omits empty top-level cache sections and loads an empty cache', function () 
     try {
         $generator->generate($routes, $cacheFile);
 
-        expect(require $cacheFile)->toBe([])
+        expect(require $cacheFile)->toBe(['version' => RouteCacheGenerator::CACHE_VERSION])
             ->and(CompiledRoutes::fromCache($cacheFile))->toHaveCount(0);
 
         $routes->addRoute(RouteRecord::get('home', '/', 'HomeController'));

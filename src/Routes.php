@@ -9,6 +9,8 @@ use Componenta\Http\Router\Contract\CompilerInterface;
 use Componenta\Http\Router\Contract\GeneratorInterface;
 use Componenta\Http\Router\Contract\MatcherInterface;
 use Componenta\Http\Router\Contract\RouteCollectorInterface;
+use Componenta\Http\Router\Contract\SyntaxParserInterface;
+use Componenta\Http\Router\Syntax\CompositeSyntax;
 use Componenta\Http\Router\Exception\MethodNotAllowedException;
 use Componenta\Http\Router\Exception\RouteAlreadyExistsException;
 use Componenta\Http\Router\Exception\RouteNotFoundException;
@@ -47,6 +49,7 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
 
     public function __construct(
         public CompilerInterface $compiler = new Compiler(),
+        public readonly ?SyntaxParserInterface $syntax = null,
     ) {
         $this->groups = new GroupCollector();
     }
@@ -140,9 +143,8 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
             return $dynamicResult;
         }
 
-        if ($allowedMethods === []) {
-            $allowedMethods = $this->getAllowedMethodsForDynamicUri($uri);
-        }
+        $allowedMethods = array_values(array_unique([...$allowedMethods, ...$this->getAllowedMethodsForDynamicUri($uri)]));
+        sort($allowedMethods, SORT_STRING);
 
         if ($allowedMethods !== []) {
             throw new MethodNotAllowedException($uri, $method, $allowedMethods);
@@ -184,7 +186,9 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
         }
 
         if ($allowedMethods !== []) {
-            throw new MethodNotAllowedException($uri, $method, array_unique($allowedMethods));
+            $allowedMethods = array_values(array_unique($allowedMethods));
+            sort($allowedMethods, SORT_STRING);
+            throw new MethodNotAllowedException($uri, $method, $allowedMethods);
         }
 
         throw new RouteNotFoundException($uri, $method);
@@ -203,7 +207,11 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
             $route->defaults
         );
 
-        return $this->compiler->syntax->buildPath(
+        $syntax = $this->syntax ?? ($this->compiler instanceof Compiler
+            ? $this->compiler->syntax
+            : new CompositeSyntax());
+
+        return $syntax->buildPath(
             $route->path,
             $parameters + $compiled->defaults,
             $compiled->tokens,

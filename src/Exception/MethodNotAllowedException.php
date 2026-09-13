@@ -18,7 +18,7 @@ final class MethodNotAllowedException extends RouterException
         public private(set) readonly array $allowedMethods,
     ) {
         $allowed = implode(', ', $allowedMethods);
-        parent::__construct("Method {$method} not allowed for {$uri}. Allowed: {$allowed}");
+        parent::__construct("Method {$method} not allowed for {$uri}. Allowed: {$allowed}", 405);
     }
 
     public string $allowHeader {

@@ -1,64 +1,48 @@
 <?php
-
 declare(strict_types=1);
-
 namespace Componenta\Http\Router\Factory;
 
-use Componenta\Stdlib\PathResolverInterface;
-use Componenta\Config\Config;
-use Componenta\Http\Router\Compiler;
+use Componenta\Config\ContainerValue;
 use Componenta\Http\Router\ConfigKey;
 use Componenta\Http\Router\Contract\CompilerInterface;
+use Componenta\Http\Router\Contract\RouteLocatorInterface;
+use Componenta\Http\Router\Locator\CachedRouteLocator;
 use Componenta\Http\Router\Locator\RouteLocator;
-use Psr\Container\ContainerInterface;
+use Componenta\Stdlib\PathResolverInterface;
+use InvalidArgumentException;
 
 final readonly class RouteLocatorFactory
 {
-    /**
-     * Resolution rules:
-     *  - **Production with `*.cache.php` next to `ROUTES_FILE`**:
-     *    use the cached file directly. {@see RouteLocator} auto-detects
-     *    cache mode by `.cache` substring and loads {@see \Componenta\Http\Router\CompiledRoutes}
-     *    instead of executing route registration.
-     *  - **Without cache**: bare {@see RouteLocator} on the static routes file.
-     *    Attribute-driven routes belong to `componenta/router-app`.
-     */
-    public function __invoke(ContainerInterface $container): RouteLocator
+    public function __invoke(ContainerValue $container): RouteLocatorInterface
     {
-        /** @var Config $config */
-        $config = $container->get(ConfigKey::CONFIG);
-        $paths = $container->get(PathResolverInterface::class);
-
-        $routesFile = $paths->resolve($config->get(ConfigKey::ROUTES_FILE));
-        $compiler   = $container->get(CompilerInterface::class);
-        $target = $routesFile;
-
-        if ($config->environment->match('APP_ENV', 'production') && $this->compiledPipelineEnabled($config)) {
-            $cacheFile = $config->get(ConfigKey::ROUTES_CACHE_FILE, default: null);
-            $cacheFile = is_string($cacheFile)
-                ? $paths->resolve($cacheFile)
-                : self::cacheFileFor($routesFile);
-            $target    = is_file($cacheFile) ? $cacheFile : $routesFile;
+        $paths = $container->get(PathResolverInterface::class, PathResolverInterface::class);
+        $routesFile = $paths->resolve($container->config->string(ConfigKey::ROUTES_FILE));
+        $source = new RouteLocator($routesFile, $container->get(CompilerInterface::class, CompilerInterface::class), useCache: false);
+        if ($container->config->environment->match('APP_ENV', 'production')
+            && $container->config->bool(ConfigKey::COMPILED_PIPELINE, true)) {
+            return new CachedRouteLocator(self::cacheFile($container), static fn (): RouteLocator => $source);
         }
-
-        return new RouteLocator($target, $compiler);
+        return $source;
     }
 
-    private function compiledPipelineEnabled(Config $config): bool
+    public static function cacheFile(ContainerValue $container): string
     {
-        return (bool) $config->get(ConfigKey::COMPILED_PIPELINE, true);
+        $paths = $container->get(PathResolverInterface::class, PathResolverInterface::class);
+        $routes = $paths->resolve($container->config->string(ConfigKey::ROUTES_FILE));
+        $value = $container->config->get(ConfigKey::ROUTES_CACHE_FILE, null);
+        if ($value !== null && (!is_string($value) || trim($value) === '')) {
+            throw new InvalidArgumentException(ConfigKey::ROUTES_CACHE_FILE . ' must be a non-empty path.');
+        }
+        $file = $value === null ? self::cacheFileFor($routes) : $paths->resolve($value);
+        if (strtolower(str_replace('\\', '/', $file)) === strtolower(str_replace('\\', '/', $routes))) {
+            throw new InvalidArgumentException('Routes cache must not overwrite its source file.');
+        }
+        return $file;
     }
 
-    /**
-     * Derives the cache-file path from the configured routes file by
-     * inserting `.cache` before the extension (`routes.php` -> `routes.cache.php`).
-     */
     public static function cacheFileFor(string $routesFile): string
     {
-        $dir  = dirname($routesFile);
-        $base = pathinfo($routesFile, PATHINFO_FILENAME);
-        $ext  = pathinfo($routesFile, PATHINFO_EXTENSION);
-
-        return $dir . DIRECTORY_SEPARATOR . $base . '.cache.' . ($ext === '' ? 'php' : $ext);
+        return dirname($routesFile) . DIRECTORY_SEPARATOR . pathinfo($routesFile, PATHINFO_FILENAME)
+            . '.cache.' . (pathinfo($routesFile, PATHINFO_EXTENSION) ?: 'php');
     }
 }

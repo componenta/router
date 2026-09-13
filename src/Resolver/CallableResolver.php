@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Componenta\Http\Router\Resolver;
 
 use Componenta\DI\CallableResolverInterface;
-use Componenta\DI\Exception\CallableExceptionInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
@@ -26,9 +25,6 @@ final class CallableResolver
         private(set) readonly CallableResolverInterface $resolver,
     ) {}
 
-    /**
-     * @throws CallableExceptionInterface
-     */
     public function resolve(mixed $callable): callable
     {
         $method = array_find(

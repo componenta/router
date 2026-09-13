@@ -151,6 +151,8 @@ $url = $routes->generate($routes, 'home');
 
 `Routes` compiles static and dynamic lookup tables lazily after registration. Static routes use hash lookup. Dynamic routes use compiled regex patterns.
 
+`Routes` accepts an optional `SyntaxParserInterface` as the named `syntax` argument for URL generation. When omitted, it uses the built-in `Compiler` syntax, or `CompositeSyntax` for another `CompilerInterface` implementation. A custom compiler does not need to expose a `syntax` property.
+
 ## Router Facade
 
 `Router` combines a route collector, matcher, and generator.

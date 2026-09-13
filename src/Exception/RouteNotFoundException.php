@@ -13,6 +13,6 @@ final class RouteNotFoundException extends RouterException
         public readonly string $uri,
         public readonly string $method,
     ) {
-        parent::__construct("No route found for {$method} {$uri}");
+        parent::__construct("No route found for {$method} {$uri}", 404);
     }
 }

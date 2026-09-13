@@ -104,10 +104,10 @@ it('disables factory-created route memoization when compiled pipeline is disable
         }
     };
 
-    $middleware = (new DispatchRouteMiddlewareFactory())(new DispatchRouteFactoryTestContainer([
-        ConfigKey::CONFIG => new Config([ConfigKey::COMPILED_PIPELINE => false]),
-        MiddlewareFactory::class => new MiddlewareFactory($resolver),
-    ]));
+    $middleware = (new DispatchRouteMiddlewareFactory())(new \Componenta\Config\ContainerValue(
+        new DispatchRouteFactoryTestContainer([MiddlewareFactory::class => new MiddlewareFactory($resolver)]),
+        new Config([ConfigKey::COMPILED_PIPELINE => false], new \Componenta\Config\Environment([])),
+    ));
     $request = dispatchRouteMiddlewareRequest('factory-uncached');
     $terminal = dispatchRouteMiddlewareTerminal();
 
@@ -140,10 +140,10 @@ it('creates memoized dispatch middleware when route memoization is enabled', fun
         }
     };
 
-    $middleware = (new DispatchRouteMiddlewareFactory())(new DispatchRouteFactoryTestContainer([
-        ConfigKey::CONFIG => new Config([]),
-        MiddlewareFactory::class => new MiddlewareFactory($resolver),
-    ]));
+    $middleware = (new DispatchRouteMiddlewareFactory())(new \Componenta\Config\ContainerValue(
+        new DispatchRouteFactoryTestContainer([MiddlewareFactory::class => new MiddlewareFactory($resolver)]),
+        new Config([], new \Componenta\Config\Environment([])),
+    ));
     $request = dispatchRouteMiddlewareRequest('factory-memoized');
     $terminal = dispatchRouteMiddlewareTerminal();
 

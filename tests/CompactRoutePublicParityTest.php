@@ -13,7 +13,7 @@ it('preserves the complete public route record in a compact cache', function ():
         'id' => '\\d+',
         'reserved_for_generator' => '[a-z]+',
     ];
-    $expectedTokens = (new Compiler())->compile('/users/{id}', $tokens)->tokens;
+    $expectedTokens = $tokens;
     $routes = new Routes();
     $routes->addRoute(RouteRecord::get(
         'users.show',
@@ -45,7 +45,7 @@ it('preserves the complete public route record in a compact cache', function ():
     }
 });
 
-it('stores custom compiler defaults once and restores them for public routes', function (): void {
+it('uses custom compiler defaults for generation while preserving explicit public tokens', function (): void {
     $compiler = new Compiler(defaultPatterns: ['id' => '[A-Z]+']);
     $generator = new RouteCacheGenerator($compiler);
     $routes = new Routes();
@@ -68,7 +68,7 @@ it('stores custom compiler defaults once and restores them for public routes', f
         expect($cache['defaultTokens'])->toBe($compiler->compile('/')->tokens)
             ->and($cache['routeData']['users.show'])->not->toHaveKey('tokens')
             ->and($compiled->getRoute('users.show')->tokens)->toBe(
-                $compiler->compile('/users/{id}')->tokens,
+                $routes->getRoute('users.show')->tokens,
             )
             ->and($compiled->generate($compiled, 'users.show', ['id' => 'ABC']))->toBe('/users/ABC');
 

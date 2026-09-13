@@ -21,7 +21,7 @@ final class RouteHandlerResolver implements MiddlewareResolverInterface
     private CallableResolver $resolver;
 
     public function __construct(
-        CallableExecutorInterface $executor,
+        private readonly CallableExecutorInterface $executor,
         private readonly ?Responder $responder = null,
     ) {
         $this->resolver = new CallableResolver($executor);
@@ -35,7 +35,7 @@ final class RouteHandlerResolver implements MiddlewareResolverInterface
 
         return new RouteHandlerMiddleware(
             $this->resolver->resolve($middleware->value),
-            $this->resolver->resolver,
+            $this->executor,
             $this->responder,
         );
     }

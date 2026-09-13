@@ -13,8 +13,8 @@ final readonly class RouteCompileResult
      * @param string $regex Compiled regex pattern
      * @param array<string, string|null> $parameters Required parameters: name => pattern|null
      * @param array<string, string|null> $optionalParameters Optional parameters: name => pattern|null
-     * @param array $tokens Inline tokens from pattern
-     * @param array $defaults Inline defaults from pattern
+     * @param array<string, string> $tokens Inline tokens from pattern
+     * @param array<string, mixed> $defaults Inline defaults from pattern
      */
     public function __construct(
         public string $regex,
