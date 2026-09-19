@@ -7,7 +7,7 @@
         "php": "^8.4",
         "componenta/arrayable": "^1.0",
         "componenta/config": "^3.0.0",
-        "componenta/di": "^5.0.0",
+        "componenta/di": "^5.0.3",
         "componenta/http-responder": "^1.0.3",
         "componenta/middleware-factory": "^2.1.0",
         "componenta/path-resolver": "^1.0",
@@ -35,7 +35,7 @@
             ]
         },
         "branch-alias": {
-            "dev-main": "2.1.x-dev"
+            "dev-main": "3.0.x-dev"
         }
     },
     "require-dev": {
