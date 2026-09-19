@@ -34,3 +34,37 @@ it('uses an explicit cache filename and falls back to the source when optimizati
         rmdir($root);
     }
 })->with([true, false]);
+
+it('preserves the lifetime of source handlers when a cache cannot be used', function (string $mode, bool $cacheFile): void {
+    $root = sys_get_temp_dir() . '/route_lifetime_' . bin2hex(random_bytes(8));
+    mkdir($root);
+    file_put_contents($root . '/routes.php', <<<'PHP'
+<?php
+$counter = 0;
+$routes->addRoute(\Componenta\Http\Router\RouteRecord::get('counter', '/counter',
+    static function () use (&$counter): int { return ++$counter; }
+));
+PHP);
+    if ($cacheFile) {
+        file_put_contents($root . '/optimized.php', '<?php return null;');
+    }
+
+    try {
+        $composition = (new ConfigFactory())->create(new Environment(['APP_ENV' => $mode]),
+            new \Componenta\Http\Router\ConfigProvider(), static fn (): array => [
+                ConfigKey::ROUTES_FILE => 'routes.php',
+                ConfigKey::ROUTES_CACHE_FILE => 'optimized.php',
+                DIConfigKey::DEPENDENCIES => [DIConfigKey::SERVICES => [PathResolverInterface::class => new PathResolver($root)]],
+            ]);
+        $locator = (new ContainerFactory())->create($composition->config, $composition->dependencies)->get(RouteLocatorInterface::class);
+
+        foreach ([[], [], ['unused' => true], []] as $context) {
+            $routes = $locator->getRoutes($context);
+            $handler = $routes->match($routes, '/counter', 'GET')->handler->value;
+            expect($handler())->toBe(1)->and($handler())->toBe(2);
+        }
+    } finally {
+        foreach (glob($root . '/*') as $file) { unlink($file); }
+        rmdir($root);
+    }
+})->with(['development', 'production'])->with(['missing cache' => false, 'unexportable routes' => true]);

@@ -21,15 +21,8 @@ final class ConfigKey extends \Componenta\Config\ConfigKey
     public const string ROUTES_CACHE_FILE = 'Componenta\Http\Router::routes_cache_file';
 
     /**
-     * Whether DispatchRouteMiddlewareFactory may return a memoizing
-     * dispatcher for resolved route middleware.
-     */
-    public const string CACHE_RESOLVED_ROUTE_MIDDLEWARE = 'Componenta\Http\Router::cache_resolved_route_middleware';
-
-    /**
-     * Master switch for compiled router fast paths. When disabled,
-     * production falls back to the plain routes file and route middleware
-     * pipelines are resolved per request.
+     * Enables compiled route collections in production.
+     * When disabled, routes are read from their original source.
      */
     public const string COMPILED_PIPELINE = 'Componenta\Http\Router::compiled_pipeline';
 }

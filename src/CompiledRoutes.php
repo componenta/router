@@ -11,11 +11,15 @@ use Componenta\Http\Router\Contract\GeneratorInterface;
 use Componenta\Http\Router\Contract\MatcherInterface;
 use Componenta\Http\Router\Contract\RouteCollectorInterface;
 use Componenta\Http\Router\Contract\SyntaxConverterInterface;
+use Componenta\Http\Router\Contract\SyntaxParserInterface;
 use Componenta\Http\Router\Exception\MethodNotAllowedException;
 use Componenta\Http\Router\Exception\RouteNotFoundException;
 use Componenta\Http\Router\Exception\RouteNotRegisteredException;
 use Componenta\Http\Router\Syntax\ColonSyntax;
+use Componenta\Http\Router\Syntax\AngleBracketSyntax;
 use Componenta\Http\Router\Syntax\CompositeSyntax;
+use Componenta\Http\Router\Syntax\CurlySyntax;
+use Componenta\Http\Router\Syntax\SquareBracketSyntax;
 use Componenta\Http\Router\Syntax\SyntaxConverter;
 use Generator;
 
@@ -26,7 +30,7 @@ use Generator;
  * - Static routes: O(1) hash lookup, zero regex
  * - Dynamic routes (unified regex): O(1) single regex match
  * - Dynamic routes (chunks): O(k) where k = relevant chunks
- * - Lazy RouteRecord initialization (PHP 8.4 lazy objects)
+ * - Cached RouteRecord instances for public access
  * - Pre-compiled regex patterns in cache
  * - Retains source syntax for URL generation
  */
@@ -35,7 +39,11 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     use ParameterCaster;
 
     private readonly ColonSyntax $syntax;
-    private readonly CompositeSyntax $sourceSyntax;
+    private readonly SyntaxParserInterface $sourceSyntax;
+    private readonly CompilerInterface $cachedCompiler;
+    private ?Routes $runtimeRoutes = null;
+    private bool $matchingStarted = false;
+    private bool $runtimeMatching = false;
     public CompilerInterface $compiler;
     public SyntaxConverterInterface $syntaxConverter;
 
@@ -57,10 +65,15 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         private readonly array $prefixIndex,
         private readonly array $defaultTokens,
         private readonly array $routeData,
+        private readonly bool $useSourceMatching = false,
+        ?SyntaxParserInterface $generationSyntax = null,
+        ?SyntaxParserInterface $compilerSyntax = null,
+        private readonly bool $explicitGenerationSyntax = true,
     ) {
         $this->syntax = new ColonSyntax();
-        $this->sourceSyntax = new CompositeSyntax();
-        $this->compiler = new Compiler();
+        $this->sourceSyntax = $generationSyntax ?? new CompositeSyntax();
+        $this->compiler = new Compiler($compilerSyntax, $defaultTokens);
+        $this->cachedCompiler = new Compiler($compilerSyntax, $defaultTokens);
         $this->syntaxConverter = new SyntaxConverter();
     }
 
@@ -171,11 +184,27 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             $data['routeMap'] ?? [],
             $data['dynamicChunks'] ?? [],
             $data['prefixIndex'] ?? [],
-            ($data['version'] ?? null) === RouteCacheGenerator::CACHE_VERSION
+            in_array($data['version'] ?? null, [4, 5, 6, 7, RouteCacheGenerator::CACHE_VERSION], true)
                 ? ($data['defaultTokens'] ?? CompilerInterface::DEFAULT_PATTERNS)
                 : [],
             $data['routeData'] ?? [],
+            ($data['version'] ?? null) === 4,
+            self::syntaxFromCache(array_key_exists('generationSyntax', $data) ? $data['generationSyntax'] : CompositeSyntax::class),
+            self::syntaxFromCache(array_key_exists('compilerSyntax', $data) ? $data['compilerSyntax'] : CompositeSyntax::class),
+            $data['explicitGenerationSyntax'] ?? (($data['version'] ?? 0) < 8),
         );
+    }
+
+    private static function syntaxFromCache(mixed $syntax): SyntaxParserInterface
+    {
+        return match ($syntax) {
+            CompositeSyntax::class => new CompositeSyntax(),
+            CurlySyntax::class => new CurlySyntax(),
+            SquareBracketSyntax::class => new SquareBracketSyntax(),
+            AngleBracketSyntax::class => new AngleBracketSyntax(),
+            ColonSyntax::class => new ColonSyntax(),
+            default => throw new \InvalidArgumentException('Unknown route cache syntax.'),
+        };
     }
 
     /** Invalid or missing generated data leaves runtime resolution to the source. */
@@ -187,19 +216,26 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         });
         try {
             $data = (static fn (string $file): mixed => require $file)($file);
+            return self::fromCacheData($data);
         } catch (\Throwable) {
             return null;
         } finally {
             restore_error_handler();
         }
+    }
+
+    private static function fromCacheData(mixed $data): ?self
+    {
         if (!is_array($data) || ($data['version'] ?? null) !== RouteCacheGenerator::CACHE_VERSION) {
             return null;
         }
+        if (array_key_exists('explicitGenerationSyntax', $data) && !is_bool($data['explicitGenerationSyntax'])) { return null; }
         foreach (['staticRoutes', 'regex', 'routeMap', 'dynamicChunks', 'prefixIndex', 'defaultTokens', 'routeData'] as $key) {
             if (isset($data[$key]) && !is_array($data[$key])) { return null; }
         }
+        if (!self::isTokenMap($data['defaultTokens'] ?? [])) { return null; }
         foreach ($data['routeData'] ?? [] as $name => $route) {
-            if (!is_string($name) || !is_array($route) || !is_string($route['path'] ?? null)
+            if (!is_array($route) || !is_string($route['path'] ?? null)
                 || !array_key_exists('handler', $route) || !is_array($route['record'] ?? null)
                 || !is_string($route['record']['path'] ?? null)
                 || !is_array($route['record']['tokens'] ?? null) || !is_array($route['record']['defaults'] ?? null)) {
@@ -208,6 +244,19 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             foreach (['methods', 'middlewares', 'tokens', 'defaults', 'paramNames', 'optionalParams'] as $key) {
                 if (isset($route[$key]) && !is_array($route[$key])) { return null; }
             }
+            if (!self::isTokenMap($route['tokens'] ?? []) || !self::isTokenMap($route['optionalParams'] ?? [], true)) {
+                return null;
+            }
+            $paramNames = $route['paramNames'] ?? [];
+            if (!array_is_list($paramNames)) { return null; }
+            foreach ($paramNames as $paramName) {
+                if (!is_string($paramName) || $paramName === '') { return null; }
+            }
+            if (count(array_unique($paramNames)) !== count($paramNames)) { return null; }
+            foreach ($route['defaults'] ?? [] as $paramName => $value) {
+                if (!is_string($paramName) || $paramName === '' || (!is_scalar($value) && $value !== null)) { return null; }
+            }
+            RouteRecord::fromArray(array_replace(['name' => (string) $name] + $route, $route['record']));
         }
         // Check all indexes and regular expressions before exposing any compiled collection.
         $known = static fn (mixed $name): bool => is_string($name) && isset($data['routeData'][$name]);
@@ -216,13 +265,13 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             foreach ($entries as $name) { if (!$known($name)) { return null; } }
         }
         foreach ($data['regex'] ?? [] as $method => $regex) {
-            if (!is_string($regex) || @preg_match($regex, '') === false || !is_array($data['routeMap'][$method] ?? null)) { return null; }
+            if (!is_string($regex) || preg_match($regex, '') === false || !is_array($data['routeMap'][$method] ?? null)) { return null; }
             foreach ($data['routeMap'][$method] as $name) { if (!$known($name)) { return null; } }
         }
-        foreach ($data['dynamicChunks'] ?? [] as $chunks) {
+        foreach ($data['dynamicChunks'] ?? [] as $method => $chunks) {
             if (!is_array($chunks)) { return null; }
             foreach ($chunks as $chunk) {
-                if (!is_array($chunk) || !is_string($chunk['regex'] ?? null) || @preg_match($chunk['regex'], '') === false
+                if (!is_array($chunk) || !is_string($chunk['regex'] ?? null) || preg_match($chunk['regex'], '') === false
                     || !is_array($chunk['routeMap'] ?? null)) { return null; }
                 foreach ($chunk['routeMap'] as $name) { if (!$known($name)) { return null; } }
             }
@@ -237,6 +286,19 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             }
         }
         return self::fromArray($data);
+    }
+
+    private static function isTokenMap(array $tokens, bool $nullable = false): bool
+    {
+        foreach ($tokens as $name => $pattern) {
+            if (!is_string($name) || $name === '' || (!is_string($pattern) && !($nullable && $pattern === null))) {
+                return false;
+            }
+            if ($pattern !== null && preg_match('#^' . $pattern . '$#', '') === false) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -257,9 +319,24 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 : $this->matchGeneric($routes, $uri, $method);
         }
 
+        if (!$this->matchingStarted) {
+            // Like Routes, matching keeps the compiler used to create its first index.
+            $this->runtimeMatching = $this->compiler != $this->cachedCompiler;
+            $this->matchingStarted = true;
+        }
+        if ($this->runtimeMatching) {
+            $source = $this->runtimeRoutes();
+            return $source->match($source, $uri, $method);
+        }
+
         $method = strtoupper($method);
 
         $uri = '/' . ltrim($uri, '/');
+
+        // Version 4 can combine expressions whose MARK metadata overwrites a route parameter.
+        if ($this->useSourceMatching) {
+            return $this->matchSourcePatterns($uri, $method);
+        }
 
         // Static route lookup - O(1)
         if (isset($this->staticRoutes[$method][$uri])) {
@@ -302,15 +379,25 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
      */
     private function matchUnifiedRegex(string $uri, string $method, array &$allowed): ?MatchResult
     {
-        if (isset($this->regex[$method]) && preg_match($this->regex[$method], $uri, $m)) {
-            /** @var array<array-key, mixed> $map */
+        if (isset($this->regex[$method])) {
             $map = $this->routeMap[$method];
-            $d = $this->routeFor(count($map) === 1 ? reset($map) : $map[$m['MARK']]);
-            return $this->matchResult($d, $this->extractParams($m, $d));
+            $matched = preg_match($this->regex[$method], $uri, $m);
+            if ($matched === false && count($map) > 1) {
+                return $this->matchSourcePatterns($uri, $method);
+            }
+            if ($matched === 1) {
+                $d = $this->routeFor(count($map) === 1 ? reset($map) : $map[$m['MARK']]);
+                return $this->matchResult($d, $this->extractParams($m, $d));
+            }
         }
 
         foreach ($this->regex as $m => $regex) {
-            if ($m !== $method && preg_match($regex, $uri)) {
+            if ($m === $method) { continue; }
+            $matched = preg_match($regex, $uri);
+            if ($matched === false && count($this->routeMap[$m]) > 1) {
+                return $this->matchSourcePatterns($uri, $method);
+            }
+            if ($matched === 1) {
                 $allowed[] = $m;
             }
         }
@@ -351,9 +438,12 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
 
                 $chunk = $this->dynamicChunks[$method][$chunkIndex];
 
-                if (preg_match($chunk['regex'], $uri, $m)) {
-                    /** @var array<array-key, mixed> $map */
-                    $map = $chunk['routeMap'];
+                $map = $chunk['routeMap'];
+                $matched = preg_match($chunk['regex'], $uri, $m);
+                if ($matched === false && count($map) > 1) {
+                    return $this->matchSourcePatterns($uri, $method);
+                }
+                if ($matched === 1) {
                     $d = $this->routeFor(count($map) === 1 ? reset($map) : $map[$m['MARK']]);
                     return $this->matchResult($d, $this->extractParams($m, $d));
                 }
@@ -365,7 +455,11 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 continue;
             }
             foreach ($methodChunks as $chunk) {
-                if (preg_match($chunk['regex'], $uri)) {
+                $matched = preg_match($chunk['regex'], $uri);
+                if ($matched === false && count($chunk['routeMap']) > 1) {
+                    return $this->matchSourcePatterns($uri, $method);
+                }
+                if ($matched === 1) {
                     $allowed[] = $m;
                     break;
                 }
@@ -373,6 +467,17 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         }
 
         return null;
+    }
+
+    private function matchSourcePatterns(string $uri, string $method): MatchResult
+    {
+        // Combined expressions can exhaust PCRE limits before individual routes do.
+        $source = new Routes($this->cachedCompiler);
+        foreach ($this as $route) {
+            $source->addRoute($route);
+        }
+
+        return $source->match($source, $uri, $method);
     }
 
     /**
@@ -425,7 +530,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             if (!$compiled->hasParameters()) {
                 if ($route->path === $uri) {
                     if ($route->allow($method)) {
-                        return new MatchResult($route->name, $route->handler, $route->middlewares, [], $routes);
+                        return new MatchResult($route->name, $route->handler, $route->middlewares, [], $route);
                     }
                     array_push($allowed, ...$route->methods);
                 }
@@ -437,7 +542,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                             $params[$name] = $this->castParameter($m[$name]);
                         }
                     }
-                    return new MatchResult($route->name, $route->handler, $route->middlewares, $params, $routes);
+                    return new MatchResult($route->name, $route->handler, $route->middlewares, $params, $route);
                 }
                 array_push($allowed, ...$route->methods);
             }
@@ -468,6 +573,11 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 : $this->generateFromRoute($routes->getRoute($name), $parameters);
         }
 
+        if ($this->compiler != $this->cachedCompiler) {
+            $source = $this->runtimeRoutes();
+            return $source->generate($source, $name, $parameters);
+        }
+
         if (!isset($this->routeData[$name])) {
             throw new RouteNotRegisteredException($name);
         }
@@ -494,6 +604,18 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         );
     }
 
+    private function runtimeRoutes(): Routes
+    {
+        if ($this->runtimeRoutes === null) {
+            $this->runtimeRoutes = new Routes($this->compiler, $this->explicitGenerationSyntax ? $this->sourceSyntax : null);
+            foreach ($this as $route) {
+                $this->runtimeRoutes->addRoute($route);
+            }
+        }
+        $this->runtimeRoutes->compiler = $this->compiler;
+        return $this->runtimeRoutes;
+    }
+
     /**
      * Generate URL from non-cached route.
      *
@@ -511,9 +633,8 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             $route->defaults
         );
 
-        $syntax = $this->compiler instanceof Compiler
-            ? $this->compiler->syntax
-            : $this->sourceSyntax;
+        $syntax = $this->explicitGenerationSyntax ? $this->sourceSyntax
+            : ($this->compiler instanceof Compiler ? $this->compiler->syntax : new CompositeSyntax());
 
         return $syntax->buildPath(
             $route->path,
@@ -543,7 +664,14 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             throw new RouteNotRegisteredException($name);
         }
 
-        return $this->records[$name] ??= RouteRecord::fromArray($this->routeRecordDataFor($name));
+        if (!isset($this->records[$name])) {
+            $data = $this->routeRecordDataFor($name);
+            $data['handler'] = $this->handlerFor($data);
+            $data['middlewares'] = $this->middlewaresFor($data) ?? [];
+            $this->records[$name] = RouteRecord::fromArray($data);
+        }
+
+        return $this->records[$name];
     }
 
     /**
@@ -554,7 +682,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     public function getIterator(): Generator
     {
         foreach ($this->routeData as $name => $data) {
-            yield $name => $this->getRoute($name);
+            yield $name => $this->getRoute((string) $name);
         }
     }
 
@@ -575,7 +703,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     {
         $routes = [];
         foreach ($this->routeData as $name => $_) {
-            $routes[$name] = $this->getRoute($name);
+            $routes[$name] = $this->getRoute((string) $name);
         }
 
         return $routes;

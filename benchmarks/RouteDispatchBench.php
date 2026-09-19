@@ -11,7 +11,6 @@ use Componenta\Http\Middleware\Resolver\CompositeResolver;
 use Componenta\Http\Middleware\Resolver\MiddlewareGroupResolver;
 use Componenta\Http\Router\MatchResult;
 use Componenta\Http\Router\Middleware\DispatchRouteMiddleware;
-use Componenta\Http\Router\Middleware\MemoizedDispatchRouteMiddleware;
 use Componenta\Http\Router\Middleware\MatchRouteMiddleware;
 use Componenta\Http\Router\Resolver\RouteHandlerResolver;
 use Componenta\Http\Router\RouteRecord;
@@ -33,7 +32,6 @@ use Psr\Http\Server\RequestHandlerInterface;
 final class RouteDispatchBench
 {
     private DispatchRouteMiddleware $middleware;
-    private DispatchRouteMiddleware $uncachedMiddleware;
     private RequestHandlerInterface $terminal;
     private ServerRequestInterface $requestWithoutMatch;
     private ServerRequestInterface $requestWithHandler;
@@ -48,8 +46,7 @@ final class RouteDispatchBench
         );
 
         $middlewareFactory = new MiddlewareFactory($resolver);
-        $this->middleware = new MemoizedDispatchRouteMiddleware($middlewareFactory);
-        $this->uncachedMiddleware = new DispatchRouteMiddleware($middlewareFactory);
+        $this->middleware = new DispatchRouteMiddleware($middlewareFactory);
         $this->terminal = new BenchmarkTerminalHandler();
         $this->requestWithoutMatch = new ServerRequest('GET', '/bench');
         $this->requestWithHandler = $this->requestWithMatch(new RouteRecord(
@@ -83,24 +80,10 @@ final class RouteDispatchBench
     }
 
     #[Revs(5000)]
-    #[Groups(['http', 'route-dispatch', 'handler', 'uncached'])]
-    public function benchDispatchRouteHandlerUncached(): void
-    {
-        $this->uncachedMiddleware->process($this->requestWithHandler, $this->terminal);
-    }
-
-    #[Revs(5000)]
     #[Groups(['http', 'route-dispatch', 'middleware-group'])]
     public function benchDispatchRouteWithMiddlewareGroup(): void
     {
         $this->middleware->process($this->requestWithMiddlewareGroup, $this->terminal);
-    }
-
-    #[Revs(5000)]
-    #[Groups(['http', 'route-dispatch', 'middleware-group', 'uncached'])]
-    public function benchDispatchRouteWithMiddlewareGroupUncached(): void
-    {
-        $this->uncachedMiddleware->process($this->requestWithMiddlewareGroup, $this->terminal);
     }
 
     private function requestWithMatch(RouteRecord $route): ServerRequestInterface

@@ -8,6 +8,34 @@ use Componenta\Http\Router\Compiler;
 use Componenta\Http\Router\RouteRecord;
 use Componenta\Http\Router\Routes;
 
+it('preserves default constraints when loading current and previous compact formats', function (int $version, bool $custom): void {
+    $compiler = new Compiler(defaultPatterns: $custom ? ['id' => '[A-Z]+'] : []);
+    $source = new Routes($compiler);
+    $source->addRoute(RouteRecord::get('item', '/items/{id}', 'ItemsHandler'));
+    $data = (new RouteCacheGenerator($compiler))->compile($source);
+    $data['version'] = $version;
+    $file = tempnam(sys_get_temp_dir(), 'route_constraints_');
+    $valid = $custom ? 'ABC' : 17;
+    $invalid = $custom ? 'abc' : 'ABC';
+
+    try {
+        file_put_contents($file, '<?php return ' . var_export($data, true) . ';');
+        foreach ([$source, CompiledRoutes::fromArray($data), CompiledRoutes::fromCache($file)] as $routes) {
+            expect($routes->generate($routes, 'item', ['id' => $valid]))->toBe('/items/' . $valid)
+                ->and($routes->match($routes, '/items/' . $valid, 'GET')->parameters)->toBe(['id' => $valid]);
+            expect(fn () => $routes->generate($routes, 'item', ['id' => $invalid]))
+                ->toThrow(InvalidArgumentException::class);
+        }
+    } finally {
+        unlink($file);
+    }
+})->with([
+    'previous implicit constraints' => [4, false],
+    'previous custom constraints' => [4, true],
+    'current implicit constraints' => [RouteCacheGenerator::CACHE_VERSION, false],
+    'current custom constraints' => [RouteCacheGenerator::CACHE_VERSION, true],
+]);
+
 it('stores compact route references and restores omitted defaults', function () {
     $routes = new Routes();
     $routes->addRoute(RouteRecord::get('home.compact', '/', 'HomeController'));
@@ -44,6 +72,30 @@ it('stores compact route references and restores omitted defaults', function () 
             ->and($compiled->generate($compiled, 'users.show', ['id' => 42]))->toBe('/users/42');
     } finally {
         @unlink($file);
+    }
+});
+
+it('uses source matching for the previous format with a MARK parameter', function (): void {
+    $source = new Routes();
+    $source->addRoute(RouteRecord::get('marked', '/items/{MARK}', 'ItemsHandler'));
+    $source->addRoute(RouteRecord::get('other', '/other/{id}', 'OtherHandler'));
+    $data = (new RouteCacheGenerator())->compile($source);
+    $data['version'] = 4;
+    $data['regex'] = ['GET' => '#^(?:/items/(?P<MARK>[^/]+)(*MARK:r0)|/other/(?P<id>\d+)(*MARK:r1))$#J'];
+    $data['routeMap'] = ['GET' => ['r0' => 'marked', 'r1' => 'other']];
+    unset($data['dynamicChunks'], $data['prefixIndex']);
+    $file = tempnam(sys_get_temp_dir(), 'route_previous_');
+
+    try {
+        file_put_contents($file, '<?php return ' . var_export($data, true) . ';');
+        foreach ([$source, CompiledRoutes::fromArray($data), CompiledRoutes::fromCache($file)] as $routes) {
+            expect($routes->match($routes, '/items/17', 'GET')->parameters)->toBe(['MARK' => 17])
+                ->and($routes->match($routes, '/items/r1', 'GET')->name)->toBe('marked')
+                ->and($routes->match($routes, '/other/23', 'GET')->parameters)->toBe(['id' => 23])
+                ->and($routes->generate($routes, 'marked', ['MARK' => 17]))->toBe('/items/17');
+        }
+    } finally {
+        unlink($file);
     }
 });
 

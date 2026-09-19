@@ -195,7 +195,7 @@ it('reuses route handler and middleware wrappers across repeated compiled matche
         ['AuthMiddleware', 'AuditMiddleware'],
     ));
 
-    $file = tempnam(__DIR__ . '/cache', 'compiled_wrappers_');
+    $file = tempnam(sys_get_temp_dir(), 'compiled_wrappers_');
     file_put_contents(
         $file,
         "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export((new RouteCacheGenerator())->compile($routes), true) . ";\n",
@@ -218,7 +218,7 @@ it('matches compiled dynamic routes when route names contain pcre mark syntax ch
     $routes = new Routes();
     $routes->addRoute(RouteRecord::get('posts.show)', '/posts/{id}', 'ShowPostController'));
 
-    $file = tempnam(__DIR__ . '/cache', 'compiled_mark_chars_');
+    $file = tempnam(sys_get_temp_dir(), 'compiled_mark_chars_');
     file_put_contents(
         $file,
         "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export((new RouteCacheGenerator())->compile($routes), true) . ";\n",
@@ -246,7 +246,7 @@ it('preserves public and private middleware boundaries in compiled routes', func
     $admin = $api->group('admin', '/admin', ['RequireAuthenticationMiddleware']);
     $admin->get('posts', '/posts', 'AdminPostsController');
 
-    $file = tempnam(__DIR__ . '/cache', 'compiled_auth_');
+    $file = tempnam(sys_get_temp_dir(), 'compiled_auth_');
     file_put_contents(
         $file,
         "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export((new RouteCacheGenerator())->compile($routes), true) . ";\n",

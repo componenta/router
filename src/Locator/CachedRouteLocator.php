@@ -10,7 +10,7 @@ use Componenta\Http\Router\Contract\RouteLocatorInterface;
 /** Loads an optional optimization; the source is resolved only when it is needed. */
 final class CachedRouteLocator implements RouteLocatorInterface
 {
-    private ?RouteCollectorInterface $routes = null;
+    private ?CompiledRoutes $routes = null;
     /** @param Closure(): RouteLocatorInterface $source */
     public function __construct(private readonly string $file, private readonly Closure $source) {}
 
@@ -19,7 +19,7 @@ final class CachedRouteLocator implements RouteLocatorInterface
         if ($context !== []) {
             return ($this->source)()->getRoutes($context);
         }
-        return $this->routes ??= CompiledRoutes::tryFromCache($this->file)
-            ?? ($this->source)()->getRoutes();
+        $this->routes ??= CompiledRoutes::tryFromCache($this->file);
+        return $this->routes ?? ($this->source)()->getRoutes();
     }
 }

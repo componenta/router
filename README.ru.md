@@ -448,9 +448,7 @@ flowchart LR
 
 Если `MatchResult` в запросе отсутствует, `DispatchRouteMiddleware` просто передает запрос следующему обработчику.
 
-`DispatchRouteMiddleware` разрешает промежуточные обработчики маршрута на каждый запрос. `MemoizedDispatchRouteMiddleware` наследует то же выполнение, но кеширует уже собранный PSR-15 объект по имени маршрута.
-
-`MemoizedDispatchRouteMiddleware` ускоряет повторные запросы к одному маршруту, но используйте его только когда список промежуточных обработчиков маршрута и способ его разрешения стабильны. Он не кеширует `ServerRequestInterface`, параметры маршрута, следующий обработчик или результат обработчика.
+`DispatchRouteMiddleware` разрешает промежуточные обработчики маршрута через фабрику на каждый запрос. Время жизни объектов определяется контейнером и резолвером middleware. Использование скомпилированной карты сохраняет то же разрешение зависимостей и выполнение обработчиков.
 
 ## Обработчики ошибок роутера
 
@@ -463,7 +461,7 @@ flowchart LR
 | `JsonRouterExceptionHandler` | Возвращает JSON-ответ для 404/405 и выставляет `Allow` для 405. |
 | `CallableRouterExceptionHandler` | Передает ошибку и запрос пользовательскому callable. |
 
-`MethodNotAllowedException::getAllowHeader()` возвращает строку для HTTP-заголовка `Allow`.
+`MethodNotAllowedException::$allowHeader` возвращает строку для HTTP-заголовка `Allow`.
 
 ## Конфигурация
 
@@ -476,7 +474,7 @@ flowchart LR
 | `RouteLocatorInterface` | `RouteLocatorFactory` |
 | `Router` | `RouterFactory` |
 | `MatchRouteMiddleware` | `MatchRouteMiddlewareFactory` |
-| `DispatchRouteMiddleware` | `DispatchRouteMiddlewareFactory`; фабрика может вернуть `MemoizedDispatchRouteMiddleware`, если включена мемоизация маршрута |
+| `DispatchRouteMiddleware` | `DispatchRouteMiddlewareFactory` |
 | `RouteHandlerResolver` | `RouteHandlerResolverFactory` |
 
 Invokable-сервисы:
@@ -500,11 +498,10 @@ Invokable-сервисы:
 | Ключ | Значение |
 |---|---|
 | `ConfigKey::ROUTES_FILE` | Путь к PHP-файлу, который регистрирует маршруты. |
-| `ConfigKey::ROUTES_CACHE_FILE` | Опциональный путь к скомпилированному файлу кеша маршрутов. |
-| `ConfigKey::CACHE_RESOLVED_ROUTE_MIDDLEWARE` | Разрешает фабрике вернуть `MemoizedDispatchRouteMiddleware` вместо обычного `DispatchRouteMiddleware`, если `COMPILED_PIPELINE` тоже включен. |
-| `ConfigKey::COMPILED_PIPELINE` | Разрешает быстрый путь скомпилированного роутера и включает возможность мемоизированного выполнения маршрута. |
+| `ConfigKey::ROUTES_CACHE_FILE` | Опциональный путь к скомпилированному файлу маршрутов. |
+| `ConfigKey::COMPILED_PIPELINE` | Включает скомпилированную карту в production; по умолчанию `true`. |
 
-`RouteLocatorFactory` получает `Config` по `ConfigKey::CONFIG` и `PathResolverInterface` из контейнера. Поэтому значения `ROUTES_FILE` и `ROUTES_CACHE_FILE` можно задавать относительно корня приложения:
+`RouteLocatorFactory` получает Config через `ContainerValue` и разрешает путь `ROUTES_FILE` через `PathResolverInterface` относительно корня приложения:
 
 ```php
 use Componenta\Http\Router\ConfigKey;
@@ -512,12 +509,11 @@ use Componenta\Http\Router\ConfigKey;
 return [
     ConfigKey::ROUTES_FILE => 'config/routes.php',
     ConfigKey::ROUTES_CACHE_FILE => 'var/cache/router/routes.cache.php',
-    ConfigKey::CACHE_RESOLVED_ROUTE_MIDDLEWARE => true,
     ConfigKey::COMPILED_PIPELINE => true,
 ];
 ```
 
-`ConfigKey::COMPILED_PIPELINE` является единственным переключателем быстрого пути.
+В development фабрика использует исходный локатор. В production при включённой оптимизации она загружает карту, подготовленную `app:build` через `componenta/router-app`. Если карта отсутствует или невалидна, используется источник.
 
 ## Файл маршрутов
 
@@ -603,15 +599,15 @@ $router = Router::fromDnf($routes);
 | Статический маршрут | O(1) поиск по методу и URI. |
 | Динамические маршруты до лимита | Одно объединенное regex-выражение на HTTP-метод, если оно проходит лимит PCRE. |
 | Большой набор динамических маршрутов | Разбиение на чанки и индекс по первому сегменту пути. |
-| Обработчики и промежуточные обработчики | `RouteHandler` и `MiddlewareGroup` создаются лениво и переиспользуются внутри `CompiledRoutes`. |
+| Описания обработчиков | `RouteHandler` и `MiddlewareGroup` создаются лениво. Разрешение исполняемых middleware выполняется на каждый запрос. |
 
-`RouteLocatorFactory` в окружении `production` использует кеш по умолчанию, если:
+`RouteCacheGenerator` компилирует переданную коллекцию; в приложении его вызывает `RouteBuilder`. Карта фиксирует входные данные на момент сборки. После изменения маршрутов, конфигурации или внешних значений, используемых PHP-файлом маршрутов, выполните `app:build` заново.
 
-1. `APP_ENV` соответствует `production`;
-2. скомпилированный путь выполнения включен через `ConfigKey::COMPILED_PIPELINE`;
-3. файл кеша существует.
+Объединённые выражения проверяются на лимиты PCRE; слишком большие группы дополнительно делятся. При исчерпании лимита во время сопоставления используются исходные отдельные шаблоны маршрутов.
 
-Если кеш-файла нет или скомпилированный путь выполнения отключен, используется обычный файл маршрутов.
+`CachedRouteLocator` использует переданный исходный локатор, если кеш отсутствует или невалиден. Обработка невалидного кеша сохраняется и при преобразовании предупреждений в исключения приложением.
+
+После замены публичного `compiler` до первого сопоставления `CompiledRoutes` использует исходную логику поиска. Генерация URL учитывает текущий компилятор и сохраняет явно заданный синтаксис генерации. Формат 8 хранит признак явного синтаксиса; `tryFromCache()` отклоняет более старые форматы для перехода к источнику.
 
 ## Атрибут Route
 
@@ -669,6 +665,5 @@ public function __construct(
 
 - В обычном коде приложения зависите от `Router`: это стандартная точка для match и generate. `MatcherInterface` и `GeneratorInterface` используйте при ручной сборке роутера или когда вы сами зарегистрировали совместимую реализацию этих контрактов.
 - Для публичных и приватных маршрутов используйте группы промежуточных обработчиков, а не дублируйте обработчики в каждом маршруте.
-- Для промежуточного обработчика маршрута, который не зависит от конкретного запроса и не должен пересоздаваться контейнером на каждый запрос, оставляйте `CACHE_RESOLVED_ROUTE_MIDDLEWARE` включенным.
 - Для больших наборов маршрутов используйте скомпилированный кеш через `RouteCacheGenerator` или интеграцию `componenta/router-app`.
 - Не смешивайте регистрацию маршрутов и сканирование атрибутов в базовом пакете: явные маршруты остаются в `componenta/router`, обнаружение атрибутов - в `componenta/router-app`.
