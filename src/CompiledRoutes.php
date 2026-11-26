@@ -173,7 +173,8 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         }
 
         $validated = [];
-        if (!self::isTokenMap($data['defaultTokens'] ?? [], $validated)) { return null; }
+        $contextCompiler = null;
+        if (!self::isTokenShape($data['defaultTokens'] ?? []) || !self::areIndependentPatterns($data['defaultTokens'] ?? [], $validated)) { return null; }
         $expectedStatic = $expectedDynamic = $pathKeys = [];
         $standardSyntax = ($data['compilerSyntax'] ?? CompositeSyntax::class) === CompositeSyntax::class;
         $defaultTokens = $data['defaultTokens'] ?? CompilerInterface::DEFAULT_PATTERNS;
@@ -189,7 +190,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             foreach (['tokens','defaults'] as $key) {
                 if (array_key_exists($key, $raw) && !is_array($raw[$key])) { return null; }
             }
-            if (!self::isTokenMap($route['tokens'] ?? [], $validated) || !self::isTokenMap($route['optionalParams'] ?? [], $validated, true)) { return null; }
+            if (!self::isTokenShape($route['tokens'] ?? []) || !self::isTokenShape($route['optionalParams'] ?? [], true)) { return null; }
             $paramNames = $route['paramNames'] ?? [];
             if (!array_is_list($paramNames)) { return null; }
             foreach ($paramNames as $paramName) {
@@ -208,6 +209,15 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 || !array_is_list($route['middlewares'] ?? []) || (isset($route['group']) && !is_string($route['group']))) { return null; }
             RouteDefinition::tokens($raw['tokens'] ?? [], $validated);
             RouteDefinition::defaults($raw['defaults'] ?? []);
+            if (!self::areIndependentPatterns($route['tokens'] ?? [], $validated) || !self::areIndependentPatterns($route['optionalParams'] ?? [], $validated)) {
+                // Inline constraints may refer to earlier captures or be
+                // overridden by an explicit token. Validate in their actual context.
+                $contextCompiler ??= new Compiler(self::syntaxFromCache($data['compilerSyntax'] ?? CompositeSyntax::class), $defaultTokens);
+                $compiled = $contextCompiler->compile($path, $raw['tokens'] ?? [], $raw['defaults'] ?? []);
+                if (array_diff_assoc($compiled->tokens, $defaultTokens) !== ($route['tokens'] ?? [])
+                    || $compiled->optionalParameters !== ($route['optionalParams'] ?? [])
+                    || $compiled->parameterNames() !== $paramNames) { return null; }
+            }
             if ($paramNames !== []) {
                 $pathKeys[$name] = RoutePrefix::indexedKey($path, $standardSyntax, [...$defaultTokens, ...($route['tokens'] ?? [])], $paramNames);
             }
@@ -250,14 +260,23 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         return self::hydrate($data);
     }
 
-    private static function isTokenMap(array $tokens, array &$validated, bool $nullable = false): bool
+    private static function isTokenShape(array $tokens, bool $nullable = false): bool
     {
         foreach ($tokens as $name => $pattern) {
-            if (!is_string($name) || $name === '' || (!is_string($pattern) && !($nullable && $pattern === null))) {
-                return false;
-            }
+            if (!is_string($name) || $name === '' || (!is_string($pattern) && !($nullable && $pattern === null))) { return false; }
+        }
+        return true;
+    }
+
+    private static function areIndependentPatterns(array $tokens, array &$validated): bool
+    {
+        foreach ($tokens as $pattern) {
             if ($pattern !== null && !isset($validated[$pattern])) {
-                if (preg_match(RouteRegex::anchored($pattern), '') === false) { return false; }
+                try {
+                    RouteRegex::validate(RouteRegex::anchored($pattern));
+                } catch (RoutePatternException) {
+                    return false;
+                }
                 $validated[$pattern] = true;
             }
         }

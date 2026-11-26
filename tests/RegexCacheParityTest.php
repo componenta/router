@@ -41,3 +41,45 @@ it('preserves capture references when preparing multiple route expressions', fun
         expect(fn () => $matcher->match($matcher, '/pair/aba', 'POST'))->toThrow(MethodNotAllowedException::class);
     }
 });
+
+
+it('loads contextual inline capture references in every supported syntax', function (string $pattern): void {
+    $source = new Routes();
+    $source->addRoute(RouteRecord::get('pair', $pattern, 'PairHandler'));
+    $file = tempnam(sys_get_temp_dir(), 'route_context_');
+    if ($file === false) { throw new RuntimeException('Cannot create fixture.'); }
+    set_error_handler(static function (int $severity, string $message, string $file, int $line): never {
+        throw new ErrorException($message, 0, $severity, $file, $line);
+    });
+    try {
+        (new RouteCacheGenerator())->generate($source, $file);
+        $cached = CompiledRoutes::fromCache($file);
+        foreach ([$source, $cached] as $routes) {
+            expect($routes->match($routes, '/abc/abc', 'GET')->parameters)->toBe(['first' => 'abc', 'second' => 'abc'])
+                ->and($routes->generate($routes, 'pair', ['first' => 'abc', 'second' => 'abc']))->toBe('/abc/abc');
+            expect(fn () => $routes->match($routes, '/abc/xyz', 'GET'))->toThrow(RouteNotFoundException::class);
+            expect(fn () => $routes->match($routes, '/abc/abc', 'POST'))->toThrow(MethodNotAllowedException::class);
+        }
+    } finally {
+        restore_error_handler();
+        unlink($file);
+    }
+})->with([
+    'curly named' => ['/{first}/{second:(?P=first)}'],
+    'curly optional' => ['/{first}/{second:(?P=first)?}'],
+    'curly numbered' => ['/{first}/{second:\1}'],
+    'square' => ['/[first]/[second:(?P=first)]'],
+    'angle' => ['/<first>/<second:(?P=first)>'],
+    'colon' => ['/:first/:second((?P=first))'],
+]);
+
+it('accepts effective explicit overrides of contextual optional constraints', function (): void {
+    $source = new Routes();
+    $source->addRoute(RouteRecord::get('item', '/items/{value:(?P=missing)?}', 'Handler', tokens: ['value' => '[a-z]+']));
+    $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+    foreach ([$source, $prepared] as $routes) {
+        expect($routes->match($routes, '/items/abc', 'GET')->parameters)->toBe(['value' => 'abc'])
+            ->and($routes->match($routes, '/items', 'GET')->parameters)->toBe([])
+            ->and($routes->generate($routes, 'item', ['value' => 'abc']))->toBe('/items/abc');
+    }
+});
