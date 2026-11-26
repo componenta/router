@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Componenta\Http\Router;
 
+use Componenta\Http\Middleware\ConfigKey as MiddlewareConfigKey;
 use Componenta\Http\Router\Contract\CompilerInterface;
 use Componenta\Http\Router\Contract\GeneratorInterface;
 use Componenta\Http\Router\Contract\MatcherInterface;
@@ -21,6 +22,11 @@ use Componenta\Http\Router\Resolver\RouteHandlerResolver;
 
 final class ConfigProvider extends \Componenta\Config\ConfigProvider
 {
+    protected function getConfig(): array
+    {
+        return [MiddlewareConfigKey::RESOLVERS => [ConfigKey::HANDLER_RESOLVER]];
+    }
+
     protected function getFactories(): array
     {
         return [
@@ -47,6 +53,7 @@ final class ConfigProvider extends \Componenta\Config\ConfigProvider
             RouterExceptionHandlerInterface::class => ThrowingRouterExceptionHandler::class,
             MatcherInterface::class => Routes::class,
             GeneratorInterface::class => Routes::class,
+            ConfigKey::HANDLER_RESOLVER => RouteHandlerResolver::class,
         ];
     }
 

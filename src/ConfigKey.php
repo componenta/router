@@ -9,6 +9,9 @@ namespace Componenta\Http\Router;
  */
 final class ConfigKey extends \Componenta\Config\ConfigKey
 {
+    /** Service ID of the selected route-handler middleware resolver. */
+    public const string HANDLER_RESOLVER = 'Componenta\Http\Router::handler_resolver';
+
     /** Path to the routes definition file. */
     public const string ROUTES_FILE = 'Componenta\Http\Router::routes_file';
 

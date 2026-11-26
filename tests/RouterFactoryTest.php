@@ -112,3 +112,25 @@ it('builds a router without requiring located routes to implement matcher or gen
         ->and($match->parameters)->toBe(['id' => 42])
         ->and($url)->toBe('/posts/42');
 });
+
+
+it('registers one replaceable route-handler resolver in the standalone middleware chain', function (): void {
+    $config = (new ConfigProvider())();
+    $service = \Componenta\Http\Router\ConfigKey::HANDLER_RESOLVER;
+    expect($config[\Componenta\Http\Middleware\ConfigKey::RESOLVERS])->toBe([$service])
+        ->and($config[BaseConfigKey::DEPENDENCIES][BaseConfigKey::ALIASES][$service])
+        ->toBe(\Componenta\Http\Router\Resolver\RouteHandlerResolver::class);
+});
+
+it('resolves the route handler through the configured standalone middleware factory', function (): void {
+    $composition = (new \Componenta\Config\ConfigFactory())->create(
+        new \Componenta\Config\Environment([]),
+        new \Componenta\Http\Middleware\ConfigProvider(),
+        new ConfigProvider(),
+    );
+    $container = (new \Componenta\DI\ContainerFactory())->create($composition->config, $composition->dependencies);
+    $middleware = $container->get(\Componenta\Http\Middleware\MiddlewareFactory::class)->createMiddleware(
+        new \Componenta\Http\Router\RouteHandler(static fn () => new \Nyholm\Psr7\Response(204)),
+    );
+    expect($middleware)->toBeInstanceOf(\Componenta\Http\Router\Resolver\RouteHandlerMiddleware::class);
+});
