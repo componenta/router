@@ -228,7 +228,8 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             } elseif (array_key_exists('regex', $route)) { return null; }
             foreach ($methods as $method) {
                 if ($paramNames !== []) {
-                    $expectedDynamic[$method][$prefix][] = $ordinal;
+                    $expectedDynamic[$method] ??= [];
+                    RoutePrefix::add($expectedDynamic[$method], $prefix, $ordinal);
                 } else {
                     if (isset($expectedStatic[$method][$path])) { return null; }
                     $expectedStatic[$method][$path] = (string) $name;

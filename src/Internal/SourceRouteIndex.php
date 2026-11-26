@@ -46,7 +46,8 @@ final readonly class SourceRouteIndex
             }
             foreach ($route->methods as $method) {
                 if ($prefix !== null) {
-                    $dynamic[$method][$prefix][] = $ordinal;
+                    $dynamic[$method] ??= [];
+                    RoutePrefix::add($dynamic[$method], $prefix, $ordinal);
                     continue;
                 }
                 $previous = $static[$method][$route->path] ?? null;

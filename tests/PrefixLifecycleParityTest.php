@@ -132,3 +132,32 @@ it('narrows a shared prefix by its guaranteed final literal segment without chan
     expect($prepared->match($prepared, '/custom/42', 'GET')->name)->toBe('custom');
     expect($map['dynamicIndex']['GET']['!5000:/items'])->toHaveCount(1);
 });
+
+
+it('discriminates guaranteed interior literal segments while retaining wildcard and optional precedence', function (): void {
+    $source = new Routes();
+    $source->addRoute(RouteRecord::get('optional', '/items/{id?}/special/{value}', 'Optional'));
+    $source->addRoute(RouteRecord::get('wildcard', '/{scope}/42/special/{value}', 'Wildcard'));
+    $source->addRoute(RouteRecord::get('multi', '/files/{any}/target/{value}', 'Multi'));
+    $source->addRoute(RouteRecord::get('mixed', '/mixed/{id}/[literal]/fixed/{value}', 'Mixed'));
+    for ($i = 0; $i < 5000; ++$i) {
+        $source->addRoute(new RouteRecord('item.' . $i, '/items/{id}/s' . $i . '/{value}', 'Item', ['GET', 'POST']));
+    }
+    $source->addRoute(RouteRecord::get('special', '/items/{id}/special/{value}', 'Special'));
+    $source->addRoute(RouteRecord::get('other-prefix', '/other/{id}/s4999/{value}', 'Other'));
+    $map = (new RouteCacheGenerator())->compile($source);
+    expect($map['dynamicIndex']['GET']['@4:2:s4999:/items'])->toBe([5003])
+        ->and($map['dynamicIndex']['GET']['@4:2:s4999:/other'])->toBe([5005]);
+    $prepared = CompiledRoutes::fromArray($map);
+    foreach ([
+        ['/items/42/s0/ok', 'GET'], ['/items/42/s4999/ok', 'GET'], ['/items/42/s4999/ok', 'POST'],
+        ['/items/42/s4999/ok', 'DELETE'], ['/items/42/special/ok', 'GET'], ['/items/special/ok', 'GET'],
+        ['/files/a/b/target/ok', 'GET'], ['/other/42/s4999/ok', 'GET'], ['/missing/42/s4999/ok', 'GET'],
+        ['/items/42/s4999/ok/extra', 'GET'], ['/mixed/42/[literal]/fixed/ok', 'GET'],
+    ] as [$uri, $method]) {
+        expect(routeLifecycleObservation($prepared, $uri, $method))->toBe(routeLifecycleObservation($source, $uri, $method));
+    }
+    expect($prepared->match($prepared, '/items/42/s4999/ok', 'GET')->name)->toBe('item.4999')
+        ->and($prepared->match($prepared, '/items/42/special/ok', 'GET')->name)->toBe('optional')
+        ->and($prepared->match($prepared, '/files/a/b/target/ok', 'GET')->parameters)->toBe(['any' => 'a/b', 'value' => 'ok']);
+});
