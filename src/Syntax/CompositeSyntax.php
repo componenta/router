@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Componenta\Http\Router\Syntax;
 
 use Componenta\Http\Router\Contract\SyntaxParserInterface;
+use Componenta\Http\Router\Internal\InlineConstraint;
 
 /**
  * Composite syntax that auto-detects and delegates to appropriate parser.
@@ -27,6 +28,7 @@ final readonly class CompositeSyntax implements SyntaxParserInterface
     private array $syntaxes;
 
     private SyntaxParserInterface $fallback;
+    private bool $builtInOrder;
 
     /**
      * @param list<SyntaxParserInterface>|null $syntaxes Ordered list of syntaxes to try
@@ -36,6 +38,7 @@ final readonly class CompositeSyntax implements SyntaxParserInterface
         ?array $syntaxes = null,
         ?SyntaxParserInterface $fallback = null,
     ) {
+        $this->builtInOrder = $syntaxes === null;
         $this->syntaxes = $syntaxes ?? [
             new CurlySyntax(),         // { is unambiguous
             new AngleBracketSyntax(),  // <name is unambiguous
@@ -59,8 +62,9 @@ final readonly class CompositeSyntax implements SyntaxParserInterface
      */
     public function detect(string $pattern): SyntaxParserInterface
     {
+        $outer = $this->builtInOrder ? self::outerSyntaxes($pattern) : null;
         foreach ($this->syntaxes as $syntax) {
-            if ($syntax->canParse($pattern)) {
+            if ($outer === null ? $syntax->canParse($pattern) : isset($outer[$syntax::class])) {
                 return $syntax;
             }
         }
@@ -68,8 +72,37 @@ final readonly class CompositeSyntax implements SyntaxParserInterface
         return $this->fallback;
     }
 
+    /** Ignore syntax markers that occur inside another placeholder's PCRE. */
+    private static function outerSyntaxes(string $pattern): array
+    {
+        $outer = [];
+        $offset = 0;
+        while (preg_match('~\{[A-Za-z_]|\[\??[A-Za-z_]|<[A-Za-z_]|(?:\A|(?<=/)):[A-Za-z_]~', $pattern, $match, PREG_OFFSET_CAPTURE, $offset) === 1) {
+            [$startText, $start] = $match[0];
+            $marker = $startText[0];
+            if ($marker === ':') {
+                $outer[ColonSyntax::class] = true;
+                $offset = InlineConstraint::colonParameter($pattern, $start)['end'];
+                continue;
+            }
+            [$class, $close] = match ($marker) {
+                '{' => [CurlySyntax::class, '}'],
+                '[' => [SquareBracketSyntax::class, ']'],
+                '<' => [AngleBracketSyntax::class, '>'],
+            };
+            $outer[$class] = true;
+            $end = InlineConstraint::bracketEnd($pattern, $start, $close);
+            if ($end === false) { break; }
+            $offset = $end + 1;
+        }
+        return $outer;
+    }
+
     public function canParse(string $pattern): bool
     {
+        if ($this->builtInOrder) {
+            return self::outerSyntaxes($pattern) !== [];
+        }
         // Composite can attempt to parse any pattern
         if (array_any($this->syntaxes, static fn($syntax) => $syntax->canParse($pattern))) {
             return true;

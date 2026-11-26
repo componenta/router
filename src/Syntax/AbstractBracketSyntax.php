@@ -61,7 +61,7 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
     protected function isValidParam(array $parsed): bool
     {
         $name = $parsed['name'];
-        return $name !== '' && !ctype_digit($name[0]);
+        return $name !== '' && preg_match('/\A[A-Za-z_][A-Za-z0-9_]*\z/', $name) === 1;
     }
 
     public function parse(string $pattern): array
@@ -104,7 +104,8 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
 
     public function hasParameter(string $segment): bool
     {
-        return str_contains($segment, $this->openChar()) && str_contains($segment, $this->closeChar());
+        $parsed = $this->parse($segment);
+        return $parsed['parameters'] !== [] || $parsed['optionalParameters'] !== [];
     }
 
     public function toRegex(string $pattern, array $tokens): string
@@ -123,6 +124,9 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
             }
 
             $end = $this->findClosing($pattern, $start);
+            if ($end === false && $this->canParse(substr($pattern, $start))) {
+                throw new InvalidArgumentException('Unclosed route parameter in: ' . $pattern);
+            }
             if ($end === false) {
                 $result .= preg_quote(substr($pattern, $pos), '#');
                 break;
@@ -184,6 +188,9 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
             }
 
             $end = $this->findClosing($pattern, $start);
+            if ($end === false && $this->canParse(substr($pattern, $start))) {
+                throw new InvalidArgumentException('Unclosed route parameter in: ' . $pattern);
+            }
             if ($end === false) {
                 $result .= substr($pattern, $pos);
                 break;
@@ -198,7 +205,7 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
                 $result .= $this->openChar() . $paramStr . $this->closeChar();
             } else {
                 $name = $parsed['name'];
-                $isOptional = $parsed['optional'] || isset($optional[$name]);
+                $isOptional = $parsed['optional'] || array_key_exists($name, $optional);
 
                 if (!isset($params[$name])) {
                     if ($isOptional) {
@@ -211,7 +218,7 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
                         throw new InvalidArgumentException("Missing required parameter '$name' for route '$routeName'");
                     }
                 } else {
-                    $result .= $static . PathParameter::encode($params[$name], $tokens[$name] ?? self::DEFAULT_PATTERN, $name);
+                    $result .= $static . PathParameter::encode($params[$name], $tokens[$name] ?? $parsed['constraint'] ?? self::DEFAULT_PATTERN, $name);
                 }
             }
 
@@ -240,6 +247,9 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
             }
 
             $end = $this->findClosing($pattern, $start);
+            if ($end === false && $this->canParse(substr($pattern, $start))) {
+                throw new InvalidArgumentException('Unclosed route parameter in: ' . $pattern);
+            }
             if ($end === false) {
                 break;
             }
@@ -281,6 +291,9 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
             $result .= $quoteStatic ? preg_quote($static, '#') : $static;
 
             $end = $this->findClosing($pattern, $start);
+            if ($end === false && $this->canParse(substr($pattern, $start))) {
+                throw new InvalidArgumentException('Unclosed route parameter in: ' . $pattern);
+            }
             if ($end === false) {
                 $remaining = substr($pattern, $start);
                 $result .= $quoteStatic ? preg_quote($remaining, '#') : $remaining;

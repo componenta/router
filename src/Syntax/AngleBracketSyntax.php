@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Componenta\Http\Router\Syntax;
 
+use Componenta\Http\Router\Internal\InlineConstraint;
+
 /**
  * Angle bracket parameter syntax.
  *
@@ -34,42 +36,12 @@ final class AngleBracketSyntax extends AbstractBracketSyntax
 
     protected function findClosing(string $pattern, int $start): int|false
     {
-        return strpos($pattern, '>', $start);
+        return InlineConstraint::bracketEnd($pattern, $start, '>');
     }
 
     protected function parseParam(string $param): array
     {
-        $name = '';
-        $constraint = null;
-        $optional = false;
-        $default = null;
-
-        $eqPos = strpos($param, '=');
-        if ($eqPos !== false) {
-            $default = substr($param, $eqPos + 1);
-            $param = substr($param, 0, $eqPos);
-        }
-
-        if (str_ends_with($param, '?')) {
-            $optional = true;
-            $param = substr($param, 0, -1);
-        }
-
-        $colonPos = strpos($param, ':');
-        if ($colonPos !== false) {
-            $name = substr($param, 0, $colonPos);
-            $c = substr($param, $colonPos + 1);
-            $constraint = $c !== '' ? $c : null;
-        } else {
-            $name = $param;
-        }
-
-        return [
-            'name' => $name,
-            'constraint' => $constraint,
-            'optional' => $optional || $default !== null,
-            'default' => $default,
-        ];
+        return InlineConstraint::bracketParameter($param, false);
     }
 
     protected function formatNormalized(array $parsed): string

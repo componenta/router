@@ -5,182 +5,111 @@ declare(strict_types=1);
 namespace Componenta\Http\Router\Syntax;
 
 use Componenta\Http\Router\Contract\SyntaxParserInterface;
-use InvalidArgumentException;
+use Componenta\Http\Router\Internal\InlineConstraint;
 use Componenta\Http\Router\Internal\PathParameter;
+use InvalidArgumentException;
 
-/**
- * Colon parameter syntax (Express.js/FastRoute style)
- *
- * Supports:
- * - :id - required parameter
- * - :id(\d+) - required with pattern
- * - :id? - optional parameter
- * - :id(\d+)? - optional with pattern
- * - :id=5 - with default (implies optional)
- * - :id(\d+)=5 - with pattern and default
- */
+/** Colon placeholders, e.g. /items/:id(\d+) or /pages/:page?=1. */
 final class ColonSyntax implements SyntaxParserInterface
 {
-    // :name or :name(\d+) or :name? or :name(\d+)? or :name=default or :name(\d+)=default
-    private const string PARAM_REGEX = '/:([a-zA-Z_][a-zA-Z0-9_]*)(?:\(([^)]+)\))?(\?)?(?:=([^\/]*))?/';
+    private const string START = '/(?:\A|(?<=\/)):[A-Za-z_]/';
     private const string DEFAULT_PATTERN = '[^/]+';
 
     public function canParse(string $pattern): bool
     {
-        // Look for :name after / or at start, but not :// (URLs) or :: (namespaces)
-        return (bool) preg_match('#(?<=/):[a-zA-Z_]|^:[a-zA-Z_]#', $pattern);
+        return preg_match(self::START, $pattern) === 1;
+    }
+
+    /** @return iterable<array{name: string, constraint: ?string, optional: bool, default: ?string, end: int, start: int}> */
+    private function parameters(string $pattern): iterable
+    {
+        $offset = 0;
+        $seen = [];
+        while (preg_match(self::START, $pattern, $match, PREG_OFFSET_CAPTURE, $offset) === 1) {
+            $start = $match[0][1];
+            $parameter = InlineConstraint::colonParameter($pattern, $start);
+            $name = $parameter['name'];
+            if (isset($seen[$name])) {
+                throw new InvalidArgumentException('Duplicate route parameter: ' . $name);
+            }
+            $seen[$name] = true;
+            $offset = $parameter['end'];
+            yield $parameter + ['start' => $start];
+        }
     }
 
     public function parse(string $pattern): array
     {
-        $parameters = [];
-        $optionalParameters = [];
-        $tokens = [];
-        $defaults = [];
-
-        if (!preg_match_all(self::PARAM_REGEX, $pattern, $matches, PREG_SET_ORDER)) {
-            return [
-                'parameters' => $parameters,
-                'optionalParameters' => $optionalParameters,
-                'tokens' => $tokens,
-                'defaults' => $defaults,
-            ];
-        }
-
-        foreach ($matches as $match) {
-            $name = $match[1];
-            if (array_key_exists($name, $parameters) || array_key_exists($name, $optionalParameters)) {
-                throw new InvalidArgumentException('Duplicate route parameter: ' . $name);
-            }
-            $constraint = !empty($match[2]) ? $match[2] : null;
-            $optional = ($match[3] ?? '') === '?';
-            $default = isset($match[4]) && $match[4] !== '' ? $match[4] : null;
-
-            // Default value implies optional
-            if ($optional || $default !== null) {
+        $parameters = $optionalParameters = $tokens = $defaults = [];
+        foreach ($this->parameters($pattern) as $parameter) {
+            ['name' => $name, 'constraint' => $constraint, 'optional' => $optional, 'default' => $default] = $parameter;
+            if ($optional) {
                 $optionalParameters[$name] = $constraint;
-                if ($default !== null) {
-                    $defaults[$name] = $default;
-                }
+                if ($default !== null) { $defaults[$name] = $default; }
             } else {
                 $parameters[$name] = $constraint;
             }
-
-            if ($constraint !== null) {
-                $tokens[$name] = $constraint;
-            }
+            if ($constraint !== null) { $tokens[$name] = $constraint; }
         }
-
-        return [
-            'parameters' => $parameters,
-            'optionalParameters' => $optionalParameters,
-            'tokens' => $tokens,
-            'defaults' => $defaults,
-        ];
+        return compact('parameters', 'optionalParameters', 'tokens', 'defaults');
     }
 
     public function hasParameter(string $segment): bool
     {
-        return (bool) preg_match(self::PARAM_REGEX, $segment);
+        return $this->canParse($segment);
     }
 
     public function toRegex(string $pattern, array $tokens): string
     {
-        $regex = '';
-        $lastPos = 0;
-
-        if (preg_match_all(self::PARAM_REGEX, $pattern, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
-            foreach ($matches as $match) {
-                $fullMatch = $match[0][0];
-                $offset = $match[0][1];
-
-                $name = $match[1][0];
-                $inlineConstraint = !empty($match[2][0]) ? $match[2][0] : null;
-                $optional = ($match[3][0] ?? '') === '?';
-                $hasDefault = isset($match[4][0]) && $match[4][0] !== '';
-
-                $constraint = $tokens[$name] ?? $inlineConstraint ?? self::DEFAULT_PATTERN;
-
-                // Escape static part before this parameter
-                $staticPart = substr($pattern, $lastPos, $offset - $lastPos);
-
-                // Strip trailing slash from static part for optional parameters -
-                // it's already included in the optional group (?:/...)
-                $separator = '';
-                if (($optional || $hasDefault) && str_ends_with($staticPart, '/')) {
-                    $staticPart = substr($staticPart, 0, -1);
-                    $separator = '/';
-                }
-
-                $regex .= preg_quote($staticPart, '#');
-
-                // Default value implies optional
-                if ($optional || $hasDefault) {
-                    $regex .= '(?:' . $separator . '(?P<' . $name . '>' . $constraint . '))?';
-                } else {
-                    $regex .= '(?P<' . $name . '>' . $constraint . ')';
-                }
-
-                $lastPos = (int) $offset + strlen($fullMatch);
+        $result = '';
+        $offset = 0;
+        foreach ($this->parameters($pattern) as $parameter) {
+            $name = $parameter['name'];
+            $constraint = $tokens[$name] ?? $parameter['constraint'] ?? self::DEFAULT_PATTERN;
+            $static = substr($pattern, $offset, $parameter['start'] - $offset);
+            $separator = '';
+            if ($parameter['optional'] && str_ends_with($static, '/')) {
+                $static = substr($static, 0, -1);
+                $separator = '/';
             }
+            $capture = '(?P<' . $name . '>' . $constraint . ')';
+            $result .= preg_quote($static, '#');
+            $result .= $parameter['optional'] ? '(?:' . $separator . $capture . ')?' : $capture;
+            $offset = $parameter['end'];
         }
-
-        $regex .= preg_quote(substr($pattern, $lastPos), '#');
-
-        return $regex;
+        return $result . preg_quote(substr($pattern, $offset), '#');
     }
 
     public function normalize(string $pattern): string
     {
-        return preg_replace_callback(
-            self::PARAM_REGEX,
-            static function (array $match): string {
-                $name = $match[1];
-                $optional = ($match[3] ?? '') === '?';
-                $hasDefault = isset($match[4]) && $match[4] !== '';
-                // Default implies optional
-                return ($optional || $hasDefault) ? ':' . $name . '?' : ':' . $name;
-            },
-            $pattern
-        );
+        $result = '';
+        $offset = 0;
+        foreach ($this->parameters($pattern) as $parameter) {
+            $result .= substr($pattern, $offset, $parameter['start'] - $offset);
+            $result .= ':' . $parameter['name'] . ($parameter['optional'] ? '?' : '');
+            $offset = $parameter['end'];
+        }
+        return $result . substr($pattern, $offset);
     }
 
     public function buildPath(string $pattern, array $params, array $tokens, array $optional, string $routeName): string
     {
         $result = '';
-        $lastPos = 0;
-
-        if (preg_match_all(self::PARAM_REGEX, $pattern, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
-            foreach ($matches as $match) {
-                $fullMatch = $match[0][0];
-                $offset = $match[0][1];
-
-                $name = $match[1][0];
-                $hasDefault = isset($match[4][0]) && $match[4][0] !== '';
-                $isOptional = ($match[3][0] ?? '') === '?' || $hasDefault || isset($optional[$name]);
-
-                $staticPart = substr($pattern, $lastPos, $offset - $lastPos);
-
-                if (!isset($params[$name])) {
-                    if ($isOptional) {
-                        // Strip trailing slash - the parameter (with its slash) is omitted
-                        if (str_ends_with($staticPart, '/')) {
-                            $staticPart = substr($staticPart, 0, -1);
-                        }
-                        $result .= $staticPart;
-                    } else {
-                        throw new InvalidArgumentException("Missing required parameter '$name' for route '$routeName'");
-                    }
-                } else {
-                    $result .= $staticPart . PathParameter::encode($params[$name], $tokens[$name] ?? self::DEFAULT_PATTERN, $name);
+        $offset = 0;
+        foreach ($this->parameters($pattern) as $parameter) {
+            $name = $parameter['name'];
+            $static = substr($pattern, $offset, $parameter['start'] - $offset);
+            if (!isset($params[$name])) {
+                if (!$parameter['optional'] && !array_key_exists($name, $optional)) {
+                    throw new InvalidArgumentException("Missing required parameter '$name' for route '$routeName'");
                 }
-
-                $lastPos = (int) $offset + strlen($fullMatch);
+                if (str_ends_with($static, '/')) { $static = substr($static, 0, -1); }
+                $result .= $static;
+            } else {
+                $result .= $static . PathParameter::encode($params[$name], $tokens[$name] ?? $parameter['constraint'] ?? self::DEFAULT_PATTERN, $name);
             }
+            $offset = $parameter['end'];
         }
-
-        $result .= substr($pattern, $lastPos);
-
-        return PathParameter::finish($result);
+        return PathParameter::finish($result . substr($pattern, $offset));
     }
 }
