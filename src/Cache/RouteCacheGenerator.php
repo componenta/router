@@ -367,15 +367,26 @@ final class RouteCacheGenerator
             throw new RuntimeException("Failed to create directory: $directory");
         }
 
-        $tempFile = $filename . '.tmp.' . uniqid('', true);
-
-        if (file_put_contents($tempFile, $content, LOCK_EX) === false) {
-            throw new RuntimeException("Failed to write file: $tempFile");
+        $tempFile = $filename . '.tmp.' . bin2hex(random_bytes(16));
+        $stream = fopen($tempFile, 'xb');
+        if ($stream === false) {
+            throw new RuntimeException("Failed to create temporary file: $tempFile");
         }
 
-        if (!rename($tempFile, $filename)) {
-            @unlink($tempFile);
-            throw new RuntimeException("Failed to rename file to: $filename");
+        try {
+            if (DIRECTORY_SEPARATOR === '/' && !chmod($tempFile, 0600)) {
+                throw new RuntimeException("Failed to secure temporary file: $tempFile");
+            }
+            if (fwrite($stream, $content) !== strlen($content) || !fflush($stream)) {
+                throw new RuntimeException("Failed to write complete file: $tempFile");
+            }
+            fclose($stream);
+            if (!rename($tempFile, $filename)) {
+                throw new RuntimeException("Failed to publish route cache: $filename");
+            }
+        } finally {
+            if (is_resource($stream)) { fclose($stream); }
+            if (is_file($tempFile)) { @unlink($tempFile); }
         }
 
         if (function_exists('opcache_invalidate')) {

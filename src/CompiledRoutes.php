@@ -32,7 +32,7 @@ use Generator;
  *
  * Performance characteristics:
  * - Static routes: O(1) hash lookup, zero regex
- * - Dynamic routes (unified regex): O(1) single regex match
+ * - Dynamic routes (unified regex): one combined PCRE match (cost depends on the expression)
  * - Dynamic routes (chunks): O(k) where k = relevant chunks
  * - Cached RouteRecord instances for public access
  * - Pre-compiled regex patterns in cache
@@ -171,7 +171,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
      */
     public static function fromCache(string $cacheFile): self
     {
-        return self::fromArray(require $cacheFile);
+        return self::fromArray(self::readCache($cacheFile) ?? throw new \RuntimeException('Cannot read route cache: ' . $cacheFile));
     }
 
     public static function fromArray(array $data): self
@@ -208,13 +208,36 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     /** Invalid or missing generated data leaves runtime resolution to the source. */
     public static function tryFromCache(string $file): ?self
     {
-        if (!is_file($file) || !is_readable($file)) { return null; }
+        return self::tryFromArray(self::readCache($file));
+    }
+
+    /** Read a trusted standalone deployment artifact, never user input. */
+    private static function readCache(string $file): ?array
+    {
+        clearstatcache(true, $file);
+        if (is_link($file) || !is_file($file) || !is_readable($file)) {
+            return null;
+        }
         set_error_handler(static function (int $severity, string $message, string $file, int $line): never {
             throw new \ErrorException($message, 0, $severity, $file, $line);
         });
         try {
-            $data = (static fn (string $file): mixed => require $file)($file);
-            return self::fromCacheData($data);
+            if (DIRECTORY_SEPARATOR === '/') {
+                $permissions = fileperms($file);
+                if ($permissions === false || ($permissions & 0o022) !== 0) {
+                    return null;
+                }
+            }
+            $level = ob_get_level();
+            if (!ob_start()) { return null; }
+            try {
+                $data = (static fn (string $file): mixed => require $file)($file);
+                return ob_get_level() === $level + 1 && ob_get_contents() === '' && is_array($data) ? $data : null;
+            } finally {
+                while (ob_get_level() > $level) {
+                    if (!ob_end_clean()) { break; }
+                }
+            }
         } catch (\Throwable) {
             return null;
         } finally {

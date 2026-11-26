@@ -85,15 +85,18 @@ final class RouteLocator implements RouteLocatorInterface
         $routes = new Routes($this->compiler);
         $context[$this->routesVarName] = $routes;
 
-        // Keep the source path and the collection outside the included scope.
-        (static function (string $__routeFile, array $__routeContext): void {
+        // The source may intentionally replace the route collection. Context
+        // variables must not replace the loader's own arguments.
+        return (static function (string $__routeFile, array $__routeContext, string $__routeVarName): Routes {
+            if (in_array($__routeVarName, ['__routeFile', '__routeContext', '__routeVarName', 'this', 'GLOBALS'], true)) {
+                throw new \InvalidArgumentException('Reserved route collection variable name.');
+            }
             extract($__routeContext, EXTR_SKIP);
             if (!is_file($__routeFile) || !is_readable($__routeFile)) {
                 throw new \RuntimeException('Cannot read route source: ' . $__routeFile);
             }
             require $__routeFile;
-        })($this->filename, $context);
-
-        return $routes;
+            return ${$__routeVarName};
+        })($this->filename, $context, $this->routesVarName);
     }
 }
