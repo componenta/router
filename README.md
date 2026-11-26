@@ -188,7 +188,7 @@ $url = $router->generate('posts.show', ['id' => 42]);
 | `parameters` | `array<string, mixed>` |
 | `route` | `RouteRecord` lazy property |
 
-Matched numeric parameters are converted only when their original string representation can be recovered exactly. Other values retain their wire-encoded string representation. URL generation accepts raw values, validates the token before and after encoding, and encodes path segments without introducing a query, fragment or authority. Captures are not implicitly percent-decoded.
+Matched numeric parameters are converted only when their original string representation can be recovered exactly. Other values retain their wire-encoded string representation. URL generation accepts raw values, encodes path segments without introducing a query, fragment or authority, and validates the complete generated path against the generation syntax's route expression. It rejects ambiguous parameter placement and supports constraints that depend on the surrounding expression. Captures are not implicitly percent-decoded.
 
 ## PSR-15 Middleware
 

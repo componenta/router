@@ -26,7 +26,25 @@ final class RouteRegex
 
     public static function validate(string $regex): void
     {
-        self::match($regex, '');
+        self::probe($regex);
+    }
+
+    /** Validate a complete expression and recognize the omitted optional root. */
+    public static function withOptionalRoot(string $expression): string
+    {
+        return self::probe(self::anchored($expression)) ? '(?:' . $expression . '|/)' : $expression;
+    }
+
+    private static function probe(string $regex): bool
+    {
+        // Configuration errors have a stable domain exception, even if
+        // the application converts PHP warnings to exceptions.
+        set_error_handler(static fn (): bool => true, E_WARNING);
+        try {
+            return self::match($regex, '');
+        } finally {
+            restore_error_handler();
+        }
     }
 
     private function __construct() {}

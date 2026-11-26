@@ -175,6 +175,7 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
     public function buildPath(string $pattern, array $params, array $tokens, array $optional, string $routeName): string
     {
         $result = '';
+        $expected = [];
         $open = $this->openChar();
         $pos = 0;
         $len = strlen($pattern);
@@ -207,7 +208,11 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
                 $name = $parsed['name'];
                 $isOptional = $parsed['optional'] || array_key_exists($name, $optional);
 
+                if (array_key_exists($name, $expected)) {
+                    throw new InvalidArgumentException('Duplicate route parameter: ' . $name);
+                }
                 if (!isset($params[$name])) {
+                    $expected[$name] = null;
                     if ($isOptional) {
                         // Strip trailing slash - the parameter (with its slash) is omitted
                         if (str_ends_with($static, '/')) {
@@ -218,14 +223,16 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
                         throw new InvalidArgumentException("Missing required parameter '$name' for route '$routeName'");
                     }
                 } else {
-                    $result .= $static . PathParameter::encode($params[$name], $tokens[$name] ?? $parsed['constraint'] ?? self::DEFAULT_PATTERN, $name);
+                    $expected[$name] = PathParameter::encode($params[$name], $name);
+                    $result .= $static . $expected[$name];
                 }
             }
 
             $pos = $end + 1;
         }
 
-        return PathParameter::finish($result);
+        $path = PathParameter::finish($result);
+        return $expected === [] ? $path : PathParameter::verify($path, $this->toRegex($pattern, $tokens), $expected, $routeName);
     }
 
     /**

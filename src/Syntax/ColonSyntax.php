@@ -95,21 +95,25 @@ final class ColonSyntax implements SyntaxParserInterface
     public function buildPath(string $pattern, array $params, array $tokens, array $optional, string $routeName): string
     {
         $result = '';
+        $expected = [];
         $offset = 0;
         foreach ($this->parameters($pattern) as $parameter) {
             $name = $parameter['name'];
             $static = substr($pattern, $offset, $parameter['start'] - $offset);
             if (!isset($params[$name])) {
+                $expected[$name] = null;
                 if (!$parameter['optional'] && !array_key_exists($name, $optional)) {
                     throw new InvalidArgumentException("Missing required parameter '$name' for route '$routeName'");
                 }
                 if (str_ends_with($static, '/')) { $static = substr($static, 0, -1); }
                 $result .= $static;
             } else {
-                $result .= $static . PathParameter::encode($params[$name], $tokens[$name] ?? $parameter['constraint'] ?? self::DEFAULT_PATTERN, $name);
+                $expected[$name] = PathParameter::encode($params[$name], $name);
+                $result .= $static . $expected[$name];
             }
             $offset = $parameter['end'];
         }
-        return PathParameter::finish($result . substr($pattern, $offset));
+        $path = PathParameter::finish($result . substr($pattern, $offset));
+        return $expected === [] ? $path : PathParameter::verify($path, $this->toRegex($pattern, $tokens), $expected, $routeName);
     }
 }
