@@ -17,6 +17,8 @@ use Componenta\Http\Router\Exception\RouteNotFoundException;
 use Componenta\Http\Router\Exception\RouteNotRegisteredException;
 use Componenta\Http\Router\Exception\RoutePatternException;
 use Componenta\Http\Router\Internal\RouteRegex;
+use Componenta\Http\Router\Internal\RouteParameters;
+use Componenta\Http\Router\Internal\SourceRouteIndex;
 use Componenta\Http\Router\Syntax\ColonSyntax;
 use Componenta\Http\Router\Syntax\AngleBracketSyntax;
 use Componenta\Http\Router\Syntax\CompositeSyntax;
@@ -38,8 +40,6 @@ use Generator;
  */
 final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface, GeneratorInterface
 {
-    use ParameterCaster;
-
     private readonly ColonSyntax $syntax;
     private readonly SyntaxParserInterface $sourceSyntax;
     private ?Routes $sourceRoutes = null;
@@ -377,7 +377,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         // Static route lookup - O(1)
         if (isset($this->staticRoutes[$method][$uri])) {
             $route = $this->routeFor($this->staticRoutes[$method][$uri]);
-            return $this->matchResult($route, $route['record']['defaults'] ?? $route['defaults'] ?? []);
+            return $this->matchResult($route, $route['defaults'] ?? []);
         }
 
         // Dynamic matching - unified regex or chunks
@@ -537,15 +537,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
      */
     private function extractParams(array $matches, array $routeData): array
     {
-        $params = $routeData['defaults'] ?? [];
-
-        foreach ($routeData['paramNames'] ?? [] as $name) {
-            if (isset($matches[$name])) {
-                $params[$name] = $this->castParameter($matches[$name]);
-            }
-        }
-
-        return $params;
+        return RouteParameters::extract($matches, $routeData['paramNames'] ?? [], $routeData['defaults'] ?? []);
     }
 
     /**
@@ -562,8 +554,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
      */
     private function matchGeneric(RouteCollectorInterface $routes, string $uri, string $method): MatchResult
     {
-        $source = Routes::fromResolved($routes, $this->compiler, $this->explicitGenerationSyntax ? $this->sourceSyntax : null);
-        return $source->match($source, $uri, $method);
+        return (new SourceRouteIndex($routes, $this->compiler))->match($uri, $method);
     }
 
     /**

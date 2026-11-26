@@ -11,12 +11,9 @@ use Componenta\Http\Router\Contract\MatcherInterface;
 use Componenta\Http\Router\Contract\RouteCollectorInterface;
 use Componenta\Http\Router\Contract\SyntaxParserInterface;
 use Componenta\Http\Router\Syntax\CompositeSyntax;
-use Componenta\Http\Router\Exception\MethodNotAllowedException;
 use Componenta\Http\Router\Exception\RouteAlreadyExistsException;
-use Componenta\Http\Router\Exception\RouteNotFoundException;
 use Componenta\Http\Router\Exception\RouteNotRegisteredException;
-use Componenta\Http\Router\Exception\RouteConflictException;
-use Componenta\Http\Router\Internal\RouteRegex;
+use Componenta\Http\Router\Internal\SourceRouteIndex;
 use Generator;
 
 /**
@@ -24,20 +21,12 @@ use Generator;
  */
 final class Routes implements RouteCollectorInterface, MatcherInterface, GeneratorInterface
 {
-    use ParameterCaster;
-
     /** @var array<string, RouteRecord> */
     private array $routes = [];
 
     private(set) GroupCollector $groups;
 
-    /** @var array<string, array<string, RouteRecord>> */
-    private array $staticRoutes = [];
-
-    /** @var array<string, list<array{route: RouteRecord, regex: string, compiled: RouteCompileResult}>> */
-    private array $dynamicRoutes = [];
-
-    private bool $compiled = false;
+    private ?SourceRouteIndex $index = null;
 
     public function __construct(
         public readonly CompilerInterface $compiler = new Compiler(),
@@ -79,7 +68,7 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
             throw new RouteAlreadyExistsException($route->name);
         }
         $this->routes[$route->name] = $route;
-        $this->compiled = false;
+        $this->index = null;
     }
 
     /**
@@ -122,34 +111,12 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
             return $this->matchGeneric($routes, $uri, $method);
         }
 
-        $this->ensureCompiled();
-
-        $method = strtoupper($method);
-        $uri = '/' . ltrim($uri, '/');
-
-        if (isset($this->staticRoutes[$method][$uri])) {
-            return $this->createMatchResult($this->staticRoutes[$method][$uri], $this->staticRoutes[$method][$uri]->defaults);
-        }
-
-        $dynamicResult = $this->matchDynamic($uri, $method);
-        if ($dynamicResult !== null) {
-            return $dynamicResult;
-        }
-
-        $allowedMethods = array_values(array_unique([...$this->getAllowedMethodsForStaticUri($uri), ...$this->getAllowedMethodsForDynamicUri($uri)]));
-        sort($allowedMethods, SORT_STRING);
-
-        if ($allowedMethods !== []) {
-            throw new MethodNotAllowedException($uri, $method, $allowedMethods);
-        }
-
-        throw new RouteNotFoundException($uri, $method);
+        return ($this->index ??= new SourceRouteIndex($this->routes, $this->compiler))->match($uri, $method);
     }
 
     private function matchGeneric(RouteCollectorInterface $routes, string $uri, string $method): MatchResult
     {
-        $source = self::fromResolved($routes, $this->compiler, $this->syntax);
-        return $source->match($source, $uri, $method);
+        return (new SourceRouteIndex($routes, $this->compiler))->match($uri, $method);
     }
 
     public function generate(RouteCollectorInterface $routes, string $name, array $parameters = []): string
@@ -159,7 +126,7 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
         }
 
         $route = $routes->getRoute($name);
-        $compiled = $this->compiler->compile(
+        $compiled = ($routes === $this ? $this->index?->pattern($name) : null) ?? $this->compiler->compile(
             $route->path,
             $route->tokens,
             $route->defaults
@@ -207,110 +174,5 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
     public function toArray(): array
     {
         return $this->routes;
-    }
-
-    private function ensureCompiled(): void
-    {
-        if ($this->compiled) {
-            return;
-        }
-
-        $this->staticRoutes = [];
-        $this->dynamicRoutes = [];
-
-        foreach ($this->routes as $route) {
-            $compiled = $this->compiler->compile(
-                $route->path,
-                $route->tokens,
-                $route->defaults
-            );
-            $isStatic = !$compiled->hasParameters();
-            $regex = RouteRegex::anchored($compiled->regex);
-            if (!$isStatic) {
-                RouteRegex::validate($regex);
-            }
-
-            foreach ($route->methods as $method) {
-                if ($isStatic) {
-                    $previous = $this->staticRoutes[$method][$route->path] ?? null;
-                    if ($previous !== null) {
-                        throw new RouteConflictException($method, $route->path, $previous->name, $route->name);
-                    }
-                    $this->staticRoutes[$method][$route->path] = $route;
-                } else {
-                    $this->dynamicRoutes[$method][] = [
-                        'route' => $route,
-                        'regex' => $regex,
-                        'compiled' => $compiled,
-                    ];
-                }
-            }
-        }
-
-        $this->compiled = true;
-    }
-
-    private function matchDynamic(string $uri, string $method): ?MatchResult
-    {
-        if (!isset($this->dynamicRoutes[$method])) {
-            return null;
-        }
-
-        foreach ($this->dynamicRoutes[$method] as $data) {
-            if (RouteRegex::match($data['regex'], $uri, $matches)) {
-                $params = $this->extractParameters($matches, $data['compiled']);
-
-                return $this->createMatchResult($data['route'], $params);
-            }
-        }
-
-        return null;
-    }
-
-    private function extractParameters(array $matches, RouteCompileResult $compiled): array
-    {
-        $params = $compiled->defaults;
-
-        foreach ($compiled->parameterNames() as $name) {
-            if (isset($matches[$name])) {
-                $params[$name] = $this->castParameter($matches[$name]);
-            }
-        }
-
-        return $params;
-    }
-
-    private function createMatchResult(RouteRecord $route, array $params): MatchResult
-    {
-        return new MatchResult($route->name, $route->handler, $route->middlewares, $params, $route);
-    }
-
-    /** @return list<string> */
-    private function getAllowedMethodsForStaticUri(string $uri): array
-    {
-        $allowed = [];
-        foreach ($this->staticRoutes as $method => $routes) {
-            if (isset($routes[$uri])) {
-                $allowed[] = $method;
-            }
-        }
-
-        return $allowed;
-    }
-
-    /** @return list<string> */
-    private function getAllowedMethodsForDynamicUri(string $uri): array
-    {
-        $allowed = [];
-        foreach ($this->dynamicRoutes as $method => $routes) {
-            foreach ($routes as $data) {
-                if (RouteRegex::match($data['regex'], $uri)) {
-                    $allowed[] = $method;
-                    break;
-                }
-            }
-        }
-
-        return $allowed;
     }
 }

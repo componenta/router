@@ -9,8 +9,8 @@ use Componenta\Http\Router\Compiler;
 use Componenta\Http\Router\Contract\CompilerInterface;
 use Componenta\Http\Router\Contract\RouteCollectorInterface;
 use Componenta\Http\Router\HttpMethod;
-use Componenta\Http\Router\Exception\RouteConflictException;
 use Componenta\Http\Router\Internal\RouteRegex;
+use Componenta\Http\Router\Internal\SourceRouteIndex;
 use Componenta\Http\Router\Routes;
 use Componenta\Http\Router\Syntax\AngleBracketSyntax;
 use Componenta\Http\Router\Syntax\ColonSyntax;
@@ -91,12 +91,12 @@ final class RouteCacheGenerator
             && $this->compiler->syntax == new CompositeSyntax();
         $combineRegex = $standardSyntax;
 
-        foreach ($routes as $route) {
-            $compiled = $this->compiler->compile(
-                $route->path,
-                $route->tokens,
-                $route->defaults
-            );
+        // Snapshot effective records once. Source and prepared paths share
+        // the same compiler validation and conflict semantics.
+        $records = iterator_to_array($routes, false);
+        $index = new SourceRouteIndex($records, $this->compiler);
+        foreach ($records as $route) {
+            $compiled = $index->pattern($route->name);
 
             $data = [
                 'path' => $this->converter->toColonSyntax($route->path),
@@ -106,9 +106,6 @@ final class RouteCacheGenerator
             ];
 
             $parameterNames = $compiled->parameterNames();
-            if ($compiled->hasParameters()) {
-                RouteRegex::validate(RouteRegex::anchored($compiled->regex));
-            }
             if ($compiled->hasParameters() && (
                 in_array('MARK', $parameterNames, true)
                 || !$this->canCombineTokens($compiled->tokens)
@@ -145,10 +142,6 @@ final class RouteCacheGenerator
                         'prefix' => $standardSyntax ? $this->getFirstSegment($route->path) : '*',
                     ];
                 } else {
-                    $previous = $staticRoutes[$method][$route->path] ?? null;
-                    if ($previous !== null) {
-                        throw new RouteConflictException($method, $route->path, $previous, $route->name);
-                    }
                     $staticRoutes[$method][$route->path] = $route->name;
                 }
             }
