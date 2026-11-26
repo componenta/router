@@ -18,10 +18,10 @@ it('strips trailing slash', function () {
     expect($route->path)->toBe('/users');
 });
 
-it('collapses double slashes', function () {
+it('preserves interior slashes', function () {
     $route = RouteRecord::get('test', '/users//list', 'handler');
 
-    expect($route->path)->toBe('/users/list');
+    expect($route->path)->toBe('/users//list');
 });
 
 it('keeps root path as slash', function () {

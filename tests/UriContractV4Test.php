@@ -40,3 +40,22 @@ it('keeps extension HTTP methods case-sensitive', function (): void {
     }
     expect(fn () => new RouteRecord('bad', '/bad', 'Controller', ["GET\r\n"]))->toThrow(InvalidArgumentException::class);
 });
+
+
+it('preserves literal empty segments and slash sequences inside inline constraints', function (): void {
+    $source = new Routes();
+    $source->addRoute(RouteRecord::get('literal', '/a//b', 'Literal'));
+    $source->addRoute(RouteRecord::get('ordinary', '/a/b', 'Ordinary'));
+    $source->addRoute(RouteRecord::get('inline', '/files/{value:a//b}', 'Inline'));
+    $source->addRoute(RouteRecord::get('optional', '/optional//{id?}', 'Optional'));
+    $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+    foreach ([$source, $prepared] as $routes) {
+        expect($routes->match($routes, '/a//b', 'GET')->name)->toBe('literal')
+            ->and($routes->match($routes, '/a/b', 'GET')->name)->toBe('ordinary')
+            ->and($routes->generate($routes, 'literal'))->toBe('/a//b')
+            ->and($routes->match($routes, '/files/a//b', 'GET')->parameters)->toBe(['value' => 'a//b'])
+            ->and($routes->generate($routes, 'inline', ['value' => 'a//b']))->toBe('/files/a//b')
+            ->and($routes->generate($routes, 'optional'))->toBe('/optional/')
+            ->and($routes->match($routes, '/optional/', 'GET')->name)->toBe('optional');
+    }
+});

@@ -20,10 +20,8 @@ final class RouteDefinition
 
     public static function normalizePath(string $path): string
     {
-        if ($path === '' || $path[0] !== '/') { $path = '/' . $path; }
-        if ($path !== '/' && str_ends_with($path, '/')) { $path = rtrim($path, '/'); }
-        if (str_contains($path, '//')) { $path = preg_replace('#/+#', '/', $path) ?? $path; }
-        return $path === '' ? '/' : $path;
+        // Interior slashes belong to the path/template, including inline PCRE.
+        return '/' . trim($path, '/');
     }
 
     /** @return list<string> */
