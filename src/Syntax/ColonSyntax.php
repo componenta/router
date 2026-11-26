@@ -6,7 +6,7 @@ namespace Componenta\Http\Router\Syntax;
 
 use Componenta\Http\Router\Contract\SyntaxParserInterface;
 use InvalidArgumentException;
-use Componenta\Http\Router\Internal\RouteRegex;
+use Componenta\Http\Router\Internal\PathParameter;
 
 /**
  * Colon parameter syntax (Express.js/FastRoute style)
@@ -49,6 +49,9 @@ final class ColonSyntax implements SyntaxParserInterface
 
         foreach ($matches as $match) {
             $name = $match[1];
+            if (array_key_exists($name, $parameters) || array_key_exists($name, $optionalParameters)) {
+                throw new InvalidArgumentException('Duplicate route parameter: ' . $name);
+            }
             $constraint = !empty($match[2]) ? $match[2] : null;
             $optional = ($match[3] ?? '') === '?';
             $default = isset($match[4]) && $match[4] !== '' ? $match[4] : null;
@@ -103,15 +106,17 @@ final class ColonSyntax implements SyntaxParserInterface
 
                 // Strip trailing slash from static part for optional parameters -
                 // it's already included in the optional group (?:/...)
+                $separator = '';
                 if (($optional || $hasDefault) && str_ends_with($staticPart, '/')) {
                     $staticPart = substr($staticPart, 0, -1);
+                    $separator = '/';
                 }
 
                 $regex .= preg_quote($staticPart, '#');
 
                 // Default value implies optional
                 if ($optional || $hasDefault) {
-                    $regex .= '(?:/(?P<' . $name . '>' . $constraint . '))?';
+                    $regex .= '(?:' . $separator . '(?P<' . $name . '>' . $constraint . '))?';
                 } else {
                     $regex .= '(?P<' . $name . '>' . $constraint . ')';
                 }
@@ -167,14 +172,7 @@ final class ColonSyntax implements SyntaxParserInterface
                         throw new InvalidArgumentException("Missing required parameter '$name' for route '$routeName'");
                     }
                 } else {
-                    $value = (string) $params[$name];
-
-                    if (!RouteRegex::match(RouteRegex::anchored($tokens[$name] ?? self::DEFAULT_PATTERN), $value)) {
-                        throw new InvalidArgumentException("Parameter '$name' value '$value' does not match pattern");
-                    }
-
-                    $result .= $staticPart;
-                    $result .= $isOptional ? '/' . $value : $value;
+                    $result .= $staticPart . PathParameter::encode($params[$name], $tokens[$name] ?? self::DEFAULT_PATTERN, $name);
                 }
 
                 $lastPos = (int) $offset + strlen($fullMatch);
@@ -183,6 +181,6 @@ final class ColonSyntax implements SyntaxParserInterface
 
         $result .= substr($pattern, $lastPos);
 
-        return str_contains($result, '//') ? preg_replace('#/+#', '/', $result) : $result;
+        return PathParameter::finish($result);
     }
 }

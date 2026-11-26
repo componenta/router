@@ -6,7 +6,7 @@ namespace Componenta\Http\Router\Syntax;
 
 use Componenta\Http\Router\Contract\SyntaxParserInterface;
 use InvalidArgumentException;
-use Componenta\Http\Router\Internal\RouteRegex;
+use Componenta\Http\Router\Internal\PathParameter;
 
 /**
  * Base class for bracket-based parameter syntaxes.
@@ -73,6 +73,9 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
 
         $this->walkParams($pattern, function (array $parsed) use (&$parameters, &$optionalParameters, &$tokens, &$defaults): void {
             $name = $parsed['name'];
+            if (array_key_exists($name, $parameters) || array_key_exists($name, $optionalParameters)) {
+                throw new InvalidArgumentException('Duplicate route parameter: ' . $name);
+            }
             $constraint = $parsed['constraint'];
             $optional = $parsed['optional'];
             $default = $parsed['default'];
@@ -121,7 +124,7 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
 
             $end = $this->findClosing($pattern, $start);
             if ($end === false) {
-                $result .= preg_quote(substr($pattern, $start), '#');
+                $result .= preg_quote(substr($pattern, $pos), '#');
                 break;
             }
 
@@ -137,13 +140,15 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
 
                 // Strip trailing slash from static part for optional parameters -
                 // it's already included in the optional group (?:/...)
+                $separator = '';
                 if ($parsed['optional'] && str_ends_with($static, '/')) {
                     $static = substr($static, 0, -1);
+                    $separator = '/';
                 }
 
                 $result .= preg_quote($static, '#');
                 $result .= $parsed['optional']
-                    ? '(?:/(?P<' . $parsed['name'] . '>' . $constraint . '))?'
+                    ? '(?:' . $separator . '(?P<' . $parsed['name'] . '>' . $constraint . '))?'
                     : '(?P<' . $parsed['name'] . '>' . $constraint . ')';
             }
 
@@ -180,7 +185,7 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
 
             $end = $this->findClosing($pattern, $start);
             if ($end === false) {
-                $result .= substr($pattern, $start);
+                $result .= substr($pattern, $pos);
                 break;
             }
 
@@ -206,21 +211,14 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
                         throw new InvalidArgumentException("Missing required parameter '$name' for route '$routeName'");
                     }
                 } else {
-                    $value = (string) $params[$name];
-
-                    if (!RouteRegex::match(RouteRegex::anchored($tokens[$name] ?? self::DEFAULT_PATTERN), $value)) {
-                        throw new InvalidArgumentException("Parameter '$name' value '$value' does not match pattern");
-                    }
-
-                    $result .= $static;
-                    $result .= $isOptional ? '/' . $value : $value;
+                    $result .= $static . PathParameter::encode($params[$name], $tokens[$name] ?? self::DEFAULT_PATTERN, $name);
                 }
             }
 
             $pos = $end + 1;
         }
 
-        return $this->cleanSlashes($result);
+        return PathParameter::finish($result);
     }
 
     /**

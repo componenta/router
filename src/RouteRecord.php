@@ -29,7 +29,7 @@ final readonly class RouteRecord
     public RouteHandler $handler;
 
     /**
-     * @param list<string>|null $methods HTTP methods (normalized to uppercase)
+     * @param list<string>|null $methods HTTP method tokens (case-sensitive)
      * @param array<string, string> $tokens Parameter patterns
      * @param array<string, mixed> $defaults Default parameter values
      */
@@ -63,7 +63,7 @@ final readonly class RouteRecord
      */
     public function allow(string $method): bool
     {
-        return in_array(strtoupper($method), $this->methods, true);
+        return in_array(HttpMethod::normalize($method), $this->methods, true);
     }
 
     /**
@@ -368,14 +368,9 @@ final readonly class RouteRecord
                 throw new InvalidArgumentException('HTTP method must be a string');
             }
 
-            $upper = strtoupper(trim($method));
-
-            if ($upper === '') {
-                throw new InvalidArgumentException('HTTP method cannot be empty');
-            }
-
-            if (!in_array($upper, $normalized, true)) {
-                $normalized[] = $upper;
+            $method = HttpMethod::normalize($method);
+            if (!in_array($method, $normalized, true)) {
+                $normalized[] = $method;
             }
         }
 

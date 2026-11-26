@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Componenta\Http\Router\Middleware;
 
 use Componenta\Http\Router\Exception\RouterException;
+use Componenta\Http\Router\Exception\RouteAttributeConflictException;
 use Componenta\Http\Router\MatchResult;
 use Componenta\Http\Router\Router;
 use Psr\Container\ContainerInterface;
@@ -40,10 +41,16 @@ final class MatchRouteMiddleware implements MiddlewareInterface
         try {
             $result = $this->router->match($uri, $method);
 
-            // Add match result to request attributes
+            $existing = $request->getAttributes();
+            if (array_key_exists(self::ATTRIBUTE_MATCH_RESULT, $existing)) {
+                throw new RouteAttributeConflictException(self::ATTRIBUTE_MATCH_RESULT);
+            }
+            foreach ($result->parameters as $name => $value) {
+                if ($name === self::ATTRIBUTE_MATCH_RESULT || array_key_exists($name, $existing)) {
+                    throw new RouteAttributeConflictException($name);
+                }
+            }
             $request = $request->withAttribute(self::ATTRIBUTE_MATCH_RESULT, $result);
-
-            // Add route parameters as individual attributes
             foreach ($result->parameters as $name => $value) {
                 $request = $request->withAttribute($name, $value);
             }

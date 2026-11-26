@@ -9,6 +9,8 @@ use Componenta\Http\Router\Exception\MethodNotAllowedException;
 use Componenta\Http\Router\Exception\RouteConflictException;
 use Componenta\Http\Router\Exception\RouteNotFoundException;
 use Componenta\Http\Router\MatchResult;
+use Componenta\Http\Router\HttpMethod;
+use Componenta\Http\Router\Exception\RouteAlreadyExistsException;
 use Componenta\Http\Router\RouteCompileResult;
 use Componenta\Http\Router\RouteRecord;
 
@@ -27,6 +29,9 @@ final readonly class SourceRouteIndex
     {
         $static = $dynamic = $patterns = [];
         foreach ($records as $route) {
+            if (isset($patterns[$route->name])) {
+                throw new RouteAlreadyExistsException($route->name);
+            }
             $compiled = $compiler->compile($route->path, $route->tokens, $route->defaults);
             $patterns[$route->name] = $compiled;
             $regex = RouteRegex::anchored($compiled->regex);
@@ -57,8 +62,8 @@ final readonly class SourceRouteIndex
 
     public function match(string $uri, string $method): MatchResult
     {
-        $method = strtoupper($method);
-        $uri = '/' . ltrim($uri, '/');
+        $method = HttpMethod::normalize($method);
+        $uri = str_starts_with($uri, '/') ? $uri : '/' . $uri;
 
         $static = $this->staticRoutes[$method][$uri] ?? null;
         if ($static !== null) {
@@ -79,7 +84,7 @@ final readonly class SourceRouteIndex
             }
         }
         foreach ($this->dynamicRoutes as $other => $entries) {
-            if ((string) $other === $method || isset($allowed[$other])) {
+            if ((string) $other === $method) {
                 continue;
             }
             foreach ($entries as $entry) {

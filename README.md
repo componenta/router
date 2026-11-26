@@ -64,7 +64,7 @@ Public fields:
 | `name` | `string` | Unique route name used for matching result and URL generation. |
 | `path` | `string` | Normalized route path. |
 | `handler` | `RouteHandler` | Handler definition wrapped as route middleware. |
-| `methods` | `list<string>` | Uppercase HTTP methods. |
+| `methods` | `list<string>` | Case-sensitive HTTP method tokens. |
 | `middlewares` | `?MiddlewareGroup` | Route-level middleware group. |
 | `tokens` | `array<string, string>` | Regex constraints for path parameters. |
 | `defaults` | `array<string, mixed>` | Scalar defaults for optional parameters. |
@@ -188,7 +188,7 @@ $url = $router->generate('posts.show', ['id' => 42]);
 | `parameters` | `array<string, mixed>` |
 | `route` | `RouteRecord` lazy property |
 
-Matched numeric parameters are converted only when their original string representation can be recovered exactly. Other values retain their string representation.
+Matched numeric parameters are converted only when their original string representation can be recovered exactly. Other values retain their wire-encoded string representation. URL generation accepts raw values, validates the token before and after encoding, and encodes path segments without introducing a query, fragment or authority. Captures are not implicitly percent-decoded.
 
 ## PSR-15 Middleware
 

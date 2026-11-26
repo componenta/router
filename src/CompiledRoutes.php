@@ -365,9 +365,9 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 : $this->matchGeneric($routes, $uri, $method);
         }
 
-        $method = strtoupper($method);
+        $method = HttpMethod::normalize($method);
 
-        $uri = '/' . ltrim($uri, '/');
+        $uri = str_starts_with($uri, '/') ? $uri : '/' . $uri;
 
         // Version 4 can combine expressions whose MARK metadata overwrites a route parameter.
         if ($this->useSourceMatching) {
@@ -393,7 +393,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         // Collect allowed methods for static routes only on miss
         foreach ($this->staticRoutes as $m => $uris) {
             if (isset($uris[$uri])) {
-                $allowed[] = $m;
+                $allowed[] = (string) $m;
             }
         }
 
@@ -432,7 +432,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         }
 
         foreach ($this->regex as $m => $regex) {
-            if ($m === $method) { continue; }
+            if ((string) $m === $method) { continue; }
             $matched = @preg_match($regex, $uri);
             if ($matched === false) {
                 if (count($this->routeMap[$m]) > 1) {
@@ -441,7 +441,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 throw new RoutePatternException('Route expression failed: ' . preg_last_error_msg());
             }
             if ($matched === 1) {
-                $allowed[] = $m;
+                $allowed[] = (string) $m;
             }
         }
 
@@ -497,7 +497,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         }
 
         foreach ($this->dynamicChunks as $m => $methodChunks) {
-            if ($m === $method) {
+            if ((string) $m === $method) {
                 continue;
             }
             foreach ($methodChunks as $chunk) {
@@ -509,7 +509,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                     throw new RoutePatternException('Route expression failed: ' . preg_last_error_msg());
                 }
                 if ($matched === 1) {
-                    $allowed[] = $m;
+                    $allowed[] = (string) $m;
                     break;
                 }
             }

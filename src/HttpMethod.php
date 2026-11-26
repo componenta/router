@@ -20,9 +20,7 @@ final readonly class HttpMethod implements \Stringable
     public function __construct(
         public string $value,
     ) {
-        if (trim($value) === '') {
-            throw new \InvalidArgumentException('HTTP method cannot be empty');
-        }
+        self::normalize($value);
     }
 
     public static function get(): self
@@ -69,7 +67,11 @@ final readonly class HttpMethod implements \Stringable
 
     public static function normalize(string $method): string
     {
-        return strtoupper(trim($method));
+        // HTTP methods are case-sensitive tokens (RFC 9110, section 9.1).
+        if (preg_match('/\A[!#$%&\'\*+\-.^_`|~0-9A-Za-z]+\z/', $method) !== 1) {
+            throw new \InvalidArgumentException('Invalid HTTP method token.');
+        }
+        return $method;
     }
 
     public function __toString(): string

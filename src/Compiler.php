@@ -47,7 +47,10 @@ final readonly class Compiler implements CompilerInterface
         $regex = $this->syntax->toRegex($pattern, $mergedTokens);
 
         if ($parsed['parameters'] !== [] || $parsed['optionalParameters'] !== []) {
-            RouteRegex::validate(RouteRegex::anchored($regex));
+            // A completely omitted optional root still has the HTTP path '/'.
+            if (RouteRegex::match(RouteRegex::anchored($regex), '')) {
+                $regex = '(?:' . $regex . '|/)';
+            }
         }
 
         return new RouteCompileResult(
