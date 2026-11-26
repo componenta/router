@@ -85,8 +85,14 @@ final class RouteLocator implements RouteLocatorInterface
         $routes = new Routes($this->compiler);
         $context[$this->routesVarName] = $routes;
 
-        extract($context);
-        include $this->filename;
+        // Keep the source path and the collection outside the included scope.
+        (static function (string $__routeFile, array $__routeContext): void {
+            extract($__routeContext, EXTR_SKIP);
+            if (!is_file($__routeFile) || !is_readable($__routeFile)) {
+                throw new \RuntimeException('Cannot read route source: ' . $__routeFile);
+            }
+            require $__routeFile;
+        })($this->filename, $context);
 
         return $routes;
     }

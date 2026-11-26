@@ -67,6 +67,10 @@ final class RouteCacheGenerator
             throw new RuntimeException('Route compiler cannot be preserved in a cache; use the original route source.');
         }
 
+        if ($routes instanceof Routes && $routes->compiler != $this->compiler) {
+            throw new RuntimeException('Route cache must use the source collection compiler.');
+        }
+
         $syntax = $routes instanceof Routes && $routes->syntax !== null
             ? $routes->syntax
             : $this->compiler->syntax;
