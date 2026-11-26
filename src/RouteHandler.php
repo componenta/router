@@ -6,8 +6,15 @@ namespace Componenta\Http\Router;
 
 final readonly class RouteHandler
 {
-    public function __construct(
-        public mixed $value
-    ) {
+    public mixed $value;
+
+    public function __construct(mixed $value)
+    {
+        if (is_array($value)) {
+            $snapshot = [];
+            foreach ($value as $key => $part) { $snapshot[$key] = $part; }
+            $value = $snapshot;
+        }
+        $this->value = $value;
     }
 }

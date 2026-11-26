@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Componenta\Http\Router\Internal;
 
 use Componenta\Http\Router\Contract\CompilerInterface;
+use Componenta\Http\Router\Compiler;
+use Componenta\Http\Router\Syntax\CompositeSyntax;
 use Componenta\Http\Router\Exception\MethodNotAllowedException;
 use Componenta\Http\Router\Exception\RouteConflictException;
 use Componenta\Http\Router\Exception\RouteNotFoundException;
@@ -23,11 +25,14 @@ final readonly class SourceRouteIndex
     private array $dynamicRoutes;
     /** @var array<string, RouteCompileResult> */
     private array $patterns;
+    /** @var array<string, array<string, list<int>>> */
+    private array $prefixIndex;
 
     /** @param iterable<RouteRecord> $records */
     public function __construct(iterable $records, CompilerInterface $compiler)
     {
-        $static = $dynamic = $patterns = [];
+        $static = $dynamic = $patterns = $prefixIndex = [];
+        $standardSyntax = $compiler instanceof Compiler && $compiler->syntax == new CompositeSyntax();
         foreach ($records as $route) {
             if (isset($patterns[$route->name])) {
                 throw new RouteAlreadyExistsException($route->name);
@@ -35,11 +40,13 @@ final readonly class SourceRouteIndex
             $compiled = $compiler->compile($route->path, $route->tokens, $route->defaults);
             $patterns[$route->name] = $compiled;
             $regex = RouteRegex::anchored($compiled->regex);
-            if ($compiled->hasParameters()) {
+            if ($compiled->hasParameters() && !$compiler instanceof Compiler) {
                 RouteRegex::validate($regex);
             }
             foreach ($route->methods as $method) {
                 if ($compiled->hasParameters()) {
+                    $prefix = RoutePrefix::forPattern($route->path, $standardSyntax);
+                    $prefixIndex[$method][$prefix][] = count($dynamic[$method] ?? []);
                     $dynamic[$method][] = ['route' => $route, 'regex' => $regex, 'compiled' => $compiled];
                     continue;
                 }
@@ -53,6 +60,7 @@ final readonly class SourceRouteIndex
         $this->staticRoutes = $static;
         $this->dynamicRoutes = $dynamic;
         $this->patterns = $patterns;
+        $this->prefixIndex = $prefixIndex;
     }
 
     public function pattern(string $name): RouteCompileResult
@@ -70,7 +78,8 @@ final readonly class SourceRouteIndex
             return self::result($static, $this->patterns[$static->name]->defaults);
         }
 
-        foreach ($this->dynamicRoutes[$method] ?? [] as $entry) {
+        foreach (RoutePrefix::candidates($this->prefixIndex[$method] ?? [], $uri) as $index) {
+            $entry = $this->dynamicRoutes[$method][$index];
             if (RouteRegex::match($entry['regex'], $uri, $matches)) {
                 $pattern = $entry['compiled'];
                 return self::result($entry['route'], RouteParameters::extract($matches, $pattern->parameterNames(), $pattern->defaults));
@@ -87,7 +96,8 @@ final readonly class SourceRouteIndex
             if ((string) $other === $method) {
                 continue;
             }
-            foreach ($entries as $entry) {
+            foreach (RoutePrefix::candidates($this->prefixIndex[$other], $uri) as $index) {
+                $entry = $entries[$index];
                 if (RouteRegex::match($entry['regex'], $uri)) {
                     $allowed[(string) $other] = true;
                     break;

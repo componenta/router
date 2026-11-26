@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Componenta\Http\Router\Cache\RouteCacheGenerator;
 use Componenta\Http\Router\CompiledRoutes;
+use Componenta\Http\Router\Internal\PreparedMap;
 use Componenta\Http\Router\Compiler;
 use Componenta\Http\Router\RouteRecord;
 use Componenta\Http\Router\Routes;
@@ -16,13 +17,13 @@ it('rejects a prepared map missing a route index or assigning a route to another
     expect(CompiledRoutes::tryFromArray($map))->not->toBeNull();
     $missing = $map;
     unset($missing['staticRoutes']);
-    expect(CompiledRoutes::tryFromArray($missing))->toBeNull();
+    expect(CompiledRoutes::tryFromArray(PreparedMap::seal($missing)))->toBeNull();
     $misdirected = $map;
     $misdirected['staticRoutes'] = ['POST' => ['/' => 'home']];
-    expect(CompiledRoutes::tryFromArray($misdirected))->toBeNull();
+    expect(CompiledRoutes::tryFromArray(PreparedMap::seal($misdirected)))->toBeNull();
     $missingDynamic = $map;
-    unset($missingDynamic['regex'], $missingDynamic['routeMap']);
-    expect(CompiledRoutes::tryFromArray($missingDynamic))->toBeNull();
+    unset($missingDynamic['dynamicChunks'], $missingDynamic['prefixIndex']);
+    expect(CompiledRoutes::tryFromArray(PreparedMap::seal($missingDynamic)))->toBeNull();
 });
 
 it('refuses to prepare an index using a different compiler than its source', function (): void {

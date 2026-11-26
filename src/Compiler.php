@@ -8,6 +8,7 @@ use Componenta\Http\Router\Contract\CompilerInterface;
 use Componenta\Http\Router\Contract\SyntaxParserInterface;
 use Componenta\Http\Router\Syntax\CompositeSyntax;
 use Componenta\Http\Router\Internal\RouteRegex;
+use Componenta\Http\Router\Internal\RouteDefinition;
 
 /**
  * Route pattern compiler
@@ -28,13 +29,14 @@ final readonly class Compiler implements CompilerInterface
         $this->syntax = $syntax ?? new CompositeSyntax();
         $this->defaultTokens = array_merge(
             self::DEFAULT_PATTERNS,
-            $defaultPatterns
+            RouteDefinition::tokens($defaultPatterns)
         );
     }
 
     public function compile(string $pattern, array $tokens = [], array $defaults = []): RouteCompileResult
     {
-        $parsed = $this->syntax->parse($pattern);
+        $syntax = $this->syntax instanceof CompositeSyntax ? $this->syntax->detect($pattern) : $this->syntax;
+        $parsed = $syntax->parse($pattern);
         
         // Merge tokens: default -> inline -> explicit
         $mergedTokens = $this->defaultTokens;
@@ -44,7 +46,7 @@ final readonly class Compiler implements CompilerInterface
 
         $defaults = array_merge($parsed['defaults'], $defaults);
 
-        $regex = $this->syntax->toRegex($pattern, $mergedTokens);
+        $regex = $syntax->toRegex($pattern, $mergedTokens);
 
         if ($parsed['parameters'] !== [] || $parsed['optionalParameters'] !== []) {
             // A completely omitted optional root still has the HTTP path '/'.

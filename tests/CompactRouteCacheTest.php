@@ -46,7 +46,7 @@ it('stores compact route references and restores omitted defaults', function () 
     expect($data['version'])->toBe(RouteCacheGenerator::CACHE_VERSION)
         ->and($data['staticRoutes']['GET']['/'])->toBe('home.compact')
         ->and($data['staticRoutes']['POST']['/posts'])->toBe('posts.create')
-        ->and($data['routeMap']['GET']['r0'])->toBe('users.show')
+        ->and($data['dynamicChunks']['GET'][0]['routeMap']['r0'])->toBe('users.show')
         ->and($data['routeData']['home.compact'])->toMatchArray([
             'path' => '/',
             'handler' => 'HomeController',
@@ -107,7 +107,7 @@ it('omits empty top-level cache sections and loads an empty cache', function () 
     try {
         $generator->generate($routes, $cacheFile);
 
-        expect(require $cacheFile)->toBe(['version' => RouteCacheGenerator::CACHE_VERSION])
+        expect(array_keys(require $cacheFile))->toBe(['version', 'fingerprint'])
             ->and(CompiledRoutes::fromCache($cacheFile))->toHaveCount(0);
 
         $routes->addRoute(RouteRecord::get('home', '/', 'HomeController'));
@@ -116,6 +116,7 @@ it('omits empty top-level cache sections and loads an empty cache', function () 
             'version',
             'staticRoutes',
             'routeData',
+            'fingerprint',
         ]);
     } finally {
         @unlink($cacheFile);

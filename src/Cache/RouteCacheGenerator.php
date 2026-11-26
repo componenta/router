@@ -11,6 +11,7 @@ use Componenta\Http\Router\Contract\RouteCollectorInterface;
 use Componenta\Http\Router\HttpMethod;
 use Componenta\Http\Router\Internal\RouteRegex;
 use Componenta\Http\Router\Internal\RoutePrefix;
+use Componenta\Http\Router\Internal\PreparedMap;
 use Componenta\Http\Router\Internal\SourceRouteIndex;
 use Componenta\Http\Router\Routes;
 use Componenta\Http\Router\Syntax\AngleBracketSyntax;
@@ -18,7 +19,6 @@ use Componenta\Http\Router\Syntax\ColonSyntax;
 use Componenta\Http\Router\Syntax\CompositeSyntax;
 use Componenta\Http\Router\Syntax\CurlySyntax;
 use Componenta\Http\Router\Syntax\SquareBracketSyntax;
-use Componenta\Http\Router\Syntax\SyntaxConverter;
 use Componenta\VarExport\VarExport;
 use Componenta\VarExport\ArrayExporter;
 use Componenta\VarExport\EnumExporter;
@@ -27,21 +27,19 @@ use Componenta\VarExport\ScalarExporter;
 /**
  * Generates optimized route cache.
  *
- * Converts all routes to ColonSyntax for fastest production performance.
- * Combines ordinary expressions when they fit in PCRE limits.
+ * Retains the original route syntax and combines compatible adjacent routes
+ * into bounded expressions, preserving registration order.
  * Expressions with capture references or custom regex constructs retain their original scope.
  */
 final class RouteCacheGenerator
 {
-    public const int CACHE_VERSION = 9;
+    public const int CACHE_VERSION = 10;
 
-    private const int REGEX_LIMIT = 5000;
-    private const int CHUNK_SIZE = 50;
+    private const int CHUNK_SIZE = 24;
     private const int MAX_REGEX_SIZE = 900_000;
 
     public function __construct(
         public readonly CompilerInterface $compiler = new Compiler(),
-        public readonly SyntaxConverter $converter = new SyntaxConverter(),
     ) {}
 
     /**
@@ -63,7 +61,7 @@ final class RouteCacheGenerator
      * Separates static and dynamic routes, chooses optimal storage strategy.
      *
      * @param RouteCollectorInterface $routes Routes to compile
-     * @return array{version?: int, staticRoutes?: array, routeData?: array, regex?: array, routeMap?: array, dynamicChunks?: array, prefixIndex?: array, defaultTokens?: array, generationSyntax?: class-string, compilerSyntax?: class-string, explicitGenerationSyntax?: bool}
+     * @return array{version: int, fingerprint: ?string, staticRoutes?: array, routeData?: array, dynamicChunks?: array, prefixIndex?: array, defaultTokens?: array, generationSyntax?: class-string, compilerSyntax?: class-string, explicitGenerationSyntax?: bool}
      */
     public function compile(RouteCollectorInterface $routes): array
     {
@@ -93,7 +91,6 @@ final class RouteCacheGenerator
         $defaultTokens = $this->compiler->compile('/')->tokens;
         $standardSyntax = $this->compiler instanceof Compiler
             && $this->compiler->syntax == new CompositeSyntax();
-        $combineRegex = $standardSyntax;
 
         // Snapshot effective records once. Source and prepared paths share
         // the same compiler validation and conflict semantics.
@@ -103,20 +100,19 @@ final class RouteCacheGenerator
             $compiled = $index->pattern($route->name);
 
             $data = [
-                'path' => $this->converter->toColonSyntax($route->path),
+                'path' => $route->path,
                 'handler' => $route->handler->value,
-                // Public records retain source syntax, tokens and defaults.
-                'record' => ['path' => $route->path, 'tokens' => $route->tokens, 'defaults' => $route->defaults],
             ];
+            if ($route->tokens !== [] || $route->defaults !== []) {
+                $data['record'] = array_filter(
+                    ['tokens' => $route->tokens, 'defaults' => $route->defaults],
+                    static fn (array $values): bool => $values !== [],
+                );
+            }
 
             $parameterNames = $compiled->parameterNames();
-            if ($compiled->hasParameters() && (
-                in_array('MARK', $parameterNames, true)
-                || !$this->canCombineTokens($compiled->tokens)
-                || !$this->canCompileRegex(RouteRegex::anchored($compiled->regex))
-            )) {
-                $combineRegex = false;
-            }
+            $combinable = $standardSyntax && !in_array('MARK', $parameterNames, true)
+                && $this->canCombineTokens(array_intersect_key($compiled->tokens, array_fill_keys($parameterNames, true)));
 
             $optional = [
                 'methods' => $route->methods === [HttpMethod::GET] ? null : $route->methods,
@@ -144,6 +140,7 @@ final class RouteCacheGenerator
                         'route' => $route->name,
                         'compiled' => $compiled,
                         'prefix' => RoutePrefix::forPattern($route->path, $standardSyntax),
+                        'combinable' => $combinable,
                     ];
                 } else {
                     $staticRoutes[$method][$route->path] = $route->name;
@@ -151,18 +148,8 @@ final class RouteCacheGenerator
             }
         }
 
-        $totalDynamic = array_sum(array_map('count', $dynamicRoutes));
-
-        if ($combineRegex && $totalDynamic <= self::REGEX_LIMIT) {
-            $unifiedCache = $this->tryBuildUnifiedRegexCache($staticRoutes, $dynamicRoutes, $routeData);
-            if ($unifiedCache !== null) {
-                return $this->compactCache($unifiedCache, $defaultTokens, $syntax::class, $this->compiler->syntax::class,
-                    $routes instanceof Routes && $routes->syntax !== null);
-            }
-        }
-
         return $this->compactCache(
-            $this->buildChunkedCache($staticRoutes, $dynamicRoutes, $routeData, $combineRegex),
+            $this->buildChunkedCache($staticRoutes, $dynamicRoutes, $routeData),
             $defaultTokens,
             $syntax::class,
             $this->compiler->syntax::class,
@@ -201,7 +188,7 @@ final class RouteCacheGenerator
             $cache['defaultTokens'] = $defaultTokens;
         }
 
-        return $cache;
+        return PreparedMap::seal($cache);
     }
 
     /** @param array<array-key, mixed> $tokens */
@@ -215,35 +202,6 @@ final class RouteCacheGenerator
         }
 
         return true;
-    }
-
-    /**
-     * Attempt to build cache with single unified regex per HTTP method.
-     *
-     * Returns null if any regex exceeds PCRE size limit or fails to compile.
-     * This is the fastest matching strategy for small-to-medium route sets.
-     *
-     * @param array<string, array<string, string>> $staticRoutes Static routes by method
-     * @param array<string, list<array>> $dynamicRoutes Dynamic routes by method
-     * @param array<string, array> $routeData All route data indexed by name
-     * @return array{staticRoutes: array, routeData: array, regex: array, routeMap: array}|null
-     */
-    private function tryBuildUnifiedRegexCache(array $staticRoutes, array $dynamicRoutes, array $routeData): ?array
-    {
-        $regexMap = [];
-        $routeMap = [];
-
-        foreach ($dynamicRoutes as $method => $methodRoutes) {
-            [$pattern, $routeMap[$method]] = $this->buildRegexPattern($methodRoutes);
-
-            if (!$this->canCompileRegex($pattern)) {
-                return null;
-            }
-
-            $regexMap[$method] = $pattern;
-        }
-
-        return compact('staticRoutes', 'routeData') + ['regex' => $regexMap, 'routeMap' => $routeMap];
     }
 
     private function canCompileRegex(string $pattern): bool
@@ -272,16 +230,20 @@ final class RouteCacheGenerator
      * @param array<string, array> $routeData All route data indexed by name
      * @return array{staticRoutes: array, dynamicChunks: array, prefixIndex: array, routeData: array}
      */
-    private function buildChunkedCache(array $staticRoutes, array $dynamicRoutes, array $routeData, bool $combineRegex): array
+    private function buildChunkedCache(array $staticRoutes, array $dynamicRoutes, array $routeData): array
     {
         $dynamicChunks = [];
         $prefixIndex = [];
 
         foreach ($dynamicRoutes as $method => $methodRoutes) {
-            $chunkSize = $combineRegex ? max(30, min(self::CHUNK_SIZE, (int)(count($methodRoutes) / 5))) : 1;
             $dynamicChunks[$method] = [];
 
             for ($offset = 0, $count = count($methodRoutes); $offset < $count;) {
+                $chunkSize = 1;
+                if ($methodRoutes[$offset]['combinable']) {
+                    while ($chunkSize < self::CHUNK_SIZE && $offset + $chunkSize < $count
+                        && $methodRoutes[$offset + $chunkSize]['combinable']) { ++$chunkSize; }
+                }
                 $chunkRoutes = array_slice($methodRoutes, $offset, $chunkSize);
                 [$regex, $chunkRouteMap] = $this->buildRegexPattern($chunkRoutes);
                 while (count($chunkRoutes) > 1 && !$this->canCompileRegex($regex)) {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Componenta\Http\Router\Cache\RouteCacheGenerator;
 use Componenta\Http\Router\CompiledRoutes;
+use Componenta\Http\Router\Internal\PreparedMap;
 use Componenta\Http\Router\RouteRecord;
 use Componenta\Http\Router\Routes;
 
@@ -16,7 +17,7 @@ it('checks prefix semantics, ordering, and nested record shape at every map entr
     expect(CompiledRoutes::tryFromArray($map))->not->toBeNull();
     $invalid = [];
     $wrongPrefix = $map;
-    $wrongPrefix['prefixIndex']['GET'] = ['alpha' => [1], 'beta' => [0]];
+    $wrongPrefix['prefixIndex']['GET'] = ['/alpha' => [1], '/beta' => [0]];
     $invalid[] = $wrongPrefix;
     $wrongOrder = $map;
     $wrongOrder['dynamicChunks']['GET'] = array_reverse($wrongOrder['dynamicChunks']['GET']);
@@ -28,6 +29,7 @@ it('checks prefix semantics, ordering, and nested record shape at every map entr
     unset($missingIndex['prefixIndex']);
     $invalid[] = $missingIndex;
     foreach ($invalid as $payload) {
+        $payload = PreparedMap::seal($payload);
         expect(CompiledRoutes::tryFromArray($payload))->toBeNull()
             ->and(fn () => CompiledRoutes::fromArray($payload))->toThrow(InvalidArgumentException::class);
     }

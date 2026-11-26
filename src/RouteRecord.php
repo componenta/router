@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace Componenta\Http\Router;
 
-use InvalidArgumentException;
 use Componenta\Http\Middleware\MiddlewareGroup;
-use Componenta\Http\Router\Internal\RouteRegex;
-use Componenta\Http\Router\Exception\RoutePatternException;
+use Componenta\Http\Router\Internal\RouteDefinition;
 
 /**
  * Immutable route definition
@@ -44,13 +42,11 @@ final readonly class RouteRecord
         array $defaults = [],
         public ?string $group = null,
     ) {
-        if ($name === '' || str_contains($name, "\0")) {
-            throw new InvalidArgumentException('Route name must be non-empty and must not contain NUL.');
-        }
-        $this->path = self::normalizePath($path);
-        $this->methods = self::normalizeMethods($methods ?? [HttpMethod::GET]);
-        $this->tokens = self::validateTokens($tokens);
-        $this->defaults = self::validateDefaults($defaults);
+        RouteDefinition::validateName($name);
+        $this->path = RouteDefinition::normalizePath($path);
+        $this->methods = RouteDefinition::normalizeMethods($methods ?? [HttpMethod::GET]);
+        $this->tokens = RouteDefinition::tokens($tokens);
+        $this->defaults = RouteDefinition::defaults($defaults);
 
         $this->handler = $handler instanceof RouteHandler
             ? $handler
@@ -199,7 +195,7 @@ final readonly class RouteRecord
     {
         return new self(
             $this->name,
-            self::normalizePath($prefix) . $this->path,
+            RouteDefinition::normalizePath($prefix) . $this->path,
             $this->handler,
             $this->methods,
             $this->middlewares ?? [],
@@ -335,49 +331,6 @@ final readonly class RouteRecord
         );
     }
 
-    private static function normalizePath(string $path): string
-    {
-        if ($path === '' || $path[0] !== '/') {
-            $path = '/' . $path;
-        }
-
-        if ($path !== '/' && str_ends_with($path, '/')) {
-            $path = rtrim($path, '/');
-        }
-
-        if (str_contains($path, '//')) {
-            $path = preg_replace('#/+#', '/', $path) ?? $path;
-        }
-
-        return $path === '' ? '/' : $path;
-    }
-
-    /**
-     * @param list<string> $methods
-     * @return list<string>
-     */
-    private static function normalizeMethods(array $methods): array
-    {
-        if ($methods === []) {
-            throw new InvalidArgumentException('Route must have at least one HTTP method');
-        }
-
-        $normalized = [];
-
-        foreach ($methods as $method) {
-            if (!is_string($method)) {
-                throw new InvalidArgumentException('HTTP method must be a string');
-            }
-
-            $method = HttpMethod::normalize($method);
-            if (!in_array($method, $normalized, true)) {
-                $normalized[] = $method;
-            }
-        }
-
-        return $normalized;
-    }
-
     private static function normalizeMiddlewares(MiddlewareGroup|array|string $middlewares): ?MiddlewareGroup
     {
         if ($middlewares instanceof MiddlewareGroup) {
@@ -391,50 +344,5 @@ final readonly class RouteRecord
         }
 
         return MiddlewareGroup::fromArray($middlewares);
-    }
-
-    /**
-     * @param array<string, string> $tokens
-     * @return array<string, string>
-     */
-    private static function validateTokens(array $tokens): array
-    {
-        foreach ($tokens as $name => $pattern) {
-            if (!is_string($name) || $name === '') {
-                throw new InvalidArgumentException('Token name must be a non-empty string');
-            }
-
-            if (!is_string($pattern)) {
-                throw new InvalidArgumentException("Token pattern for '$name' must be a string");
-            }
-
-            // Validate regex pattern
-            try {
-                RouteRegex::validate(RouteRegex::anchored($pattern));
-            } catch (RoutePatternException $error) {
-                throw new InvalidArgumentException("Invalid regex pattern for token '$name': $pattern", previous: $error);
-            }
-        }
-
-        return $tokens;
-    }
-
-    /**
-     * @param array<string, mixed> $defaults
-     * @return array<string, mixed>
-     */
-    private static function validateDefaults(array $defaults): array
-    {
-        foreach ($defaults as $name => $value) {
-            if (!is_string($name) || $name === '') {
-                throw new InvalidArgumentException('Default parameter name must be a non-empty string');
-            }
-
-            if (!is_scalar($value) && $value !== null) {
-                throw new InvalidArgumentException("Default value for '$name' must be scalar or null");
-            }
-        }
-
-        return $defaults;
     }
 }
