@@ -7,7 +7,7 @@ use Componenta\Http\Router\CompiledRoutes;
 use Componenta\Http\Router\RouteRecord;
 use Componenta\Http\Router\Routes;
 
-it('matches wildcard chunks together with literal prefix chunks in registration order', function (): void {
+it('matches wildcard candidates together with literal prefix candidates in registration order', function (): void {
     $routes = new Routes();
 
     for ($index = 0; $index < 50; $index++) {
@@ -29,7 +29,7 @@ it('matches wildcard chunks together with literal prefix chunks in registration 
         ));
     }
 
-    $file = tempnam(sys_get_temp_dir(), 'componenta-router-chunks-');
+    $file = tempnam(sys_get_temp_dir(), 'componenta-router-candidates-');
 
     if ($file === false) {
         throw new RuntimeException('Unable to create a temporary route cache.');
