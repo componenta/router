@@ -107,3 +107,28 @@ it('detaches caller-owned reference slots in route and compiler definitions', fu
             ->and($match->handler->value)->toBe(['Controller', 'action']);
     }
 });
+
+
+it('narrows a shared prefix by its guaranteed final literal segment without changing order or custom token semantics', function (): void {
+    $source = new Routes();
+    $source->addRoute(RouteRecord::get('wildcard.first', '/{scope}/{id}/first', 'Wildcard'));
+    for ($i = 0; $i < 5001; ++$i) {
+        $source->addRoute(new RouteRecord('item.' . $i, '/items/{id}/' . $i, 'Item', ['GET', 'POST']));
+    }
+    $source->addRoute(RouteRecord::get('first.literal', '/items/{id}/first', 'Literal'));
+    $source->addRoute(RouteRecord::get('optional', '/archive/{id?}/end', 'Archive'));
+    $source->addRoute(RouteRecord::get('custom', '/custom/{id}/end', 'Custom', tokens: ['id' => '\d+(*ACCEPT)']));
+    $map = (new RouteCacheGenerator())->compile($source);
+    $prepared = CompiledRoutes::fromArray($map);
+    foreach ([
+        ['/items/42/0', 'GET'], ['/items/42/5000', 'GET'], ['/items/42/5000', 'POST'],
+        ['/items/42/5000', 'DELETE'], ['/items/42/first', 'GET'],
+        ['/archive/end', 'GET'], ['/archive/42/end', 'GET'], ['/archive/42/other', 'GET'],
+        ['/custom/42', 'GET'], ['/custom/42/end', 'GET'], ['/custom/no', 'GET'],
+    ] as [$uri, $method]) {
+        expect(routeLifecycleObservation($prepared, $uri, $method))->toBe(routeLifecycleObservation($source, $uri, $method));
+    }
+    expect($prepared->match($prepared, '/items/42/first', 'GET')->name)->toBe('wildcard.first');
+    expect($prepared->match($prepared, '/custom/42', 'GET')->name)->toBe('custom');
+    expect($map['prefixIndex']['GET']['!5000:/items'])->toHaveCount(1);
+});

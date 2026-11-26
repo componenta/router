@@ -43,9 +43,11 @@ final readonly class SourceRouteIndex
             if ($compiled->hasParameters() && !$compiler instanceof Compiler) {
                 RouteRegex::validate($regex);
             }
+            $prefix = $compiled->hasParameters()
+                ? RoutePrefix::indexedKey($route->path, $standardSyntax, $compiled->tokens, $compiled->parameterNames())
+                : null;
             foreach ($route->methods as $method) {
-                if ($compiled->hasParameters()) {
-                    $prefix = RoutePrefix::forPattern($route->path, $standardSyntax);
+                if ($prefix !== null) {
                     $prefixIndex[$method][$prefix][] = count($dynamic[$method] ?? []);
                     $dynamic[$method][] = ['route' => $route, 'regex' => $regex, 'compiled' => $compiled];
                     continue;

@@ -33,7 +33,7 @@ use Componenta\VarExport\ScalarExporter;
  */
 final class RouteCacheGenerator
 {
-    public const int CACHE_VERSION = 10;
+    public const int CACHE_VERSION = 11;
 
     private const int CHUNK_SIZE = 24;
     private const int MAX_REGEX_SIZE = 900_000;
@@ -132,14 +132,17 @@ final class RouteCacheGenerator
 
             $routeData[$route->name] = $data;
 
+            $prefix = $compiled->hasParameters()
+                ? RoutePrefix::indexedKey($route->path, $standardSyntax, $compiled->tokens, $parameterNames)
+                : null;
             foreach ($route->methods as $method) {
                 $method = HttpMethod::normalize($method);
 
-                if ($compiled->hasParameters()) {
+                if ($prefix !== null) {
                     $dynamicRoutes[$method][] = [
                         'route' => $route->name,
                         'compiled' => $compiled,
-                        'prefix' => RoutePrefix::forPattern($route->path, $standardSyntax),
+                        'prefix' => $prefix,
                         'combinable' => $combinable,
                     ];
                 } else {

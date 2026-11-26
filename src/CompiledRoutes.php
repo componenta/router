@@ -174,7 +174,9 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
 
         $validated = [];
         if (!self::isTokenMap($data['defaultTokens'] ?? [], $validated)) { return null; }
-        $expectedStatic = $expectedDynamic = [];
+        $expectedStatic = $expectedDynamic = $pathKeys = [];
+        $standardSyntax = ($data['compilerSyntax'] ?? CompositeSyntax::class) === CompositeSyntax::class;
+        $defaultTokens = $data['defaultTokens'] ?? CompilerInterface::DEFAULT_PATTERNS;
         $records = $data['routeData'] ?? [];
         foreach ($records as $name => $route) {
             if (!is_array($route) || !is_string($route['path'] ?? null) || !array_key_exists('handler', $route)
@@ -206,6 +208,9 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 || !array_is_list($route['middlewares'] ?? []) || (isset($route['group']) && !is_string($route['group']))) { return null; }
             RouteDefinition::tokens($raw['tokens'] ?? [], $validated);
             RouteDefinition::defaults($raw['defaults'] ?? []);
+            if ($paramNames !== []) {
+                $pathKeys[$name] = RoutePrefix::indexedKey($path, $standardSyntax, [...$defaultTokens, ...($route['tokens'] ?? [])], $paramNames);
+            }
             foreach ($methods as $method) {
                 if ($paramNames !== []) {
                     $expectedDynamic[$method][] = (string) $name;
@@ -219,7 +224,6 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
 
         $seenDynamic = [];
         $expectedPrefixes = [];
-        $standardSyntax = ($data['compilerSyntax'] ?? CompositeSyntax::class) === CompositeSyntax::class;
         foreach ($data['dynamicChunks'] ?? [] as $method => $chunks) {
             if (!is_array($chunks) || !array_is_list($chunks) || $chunks === []) { return null; }
             foreach ($chunks as $index => $chunk) {
@@ -231,7 +235,8 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 foreach ($map as $name) {
                     if (!is_string($name) || !isset($records[$name])) { return null; }
                     $seenDynamic[$method][] = $name;
-                    $prefix = RoutePrefix::forPattern($records[$name]['path'], $standardSyntax);
+                    $prefix = $pathKeys[$name] ?? null;
+                    if ($prefix === null) { return null; }
                     $expectedPrefixes[$method][$prefix][$index] = $index;
                 }
             }
