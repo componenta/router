@@ -496,8 +496,8 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 }
                 if ($matched === 1) {
                     $name = count($map) === 1 ? reset($map) : ($map[$m['MARK'] ?? ''] ?? null);
-                if (!is_string($name)) { return $this->matchSourcePatterns($uri, $method); }
-                $d = $this->routeFor($name);
+                    if (!is_string($name)) { return $this->matchSourcePatterns($uri, $method); }
+                    $d = $this->routeFor($name);
                     return $this->matchResult($d, $this->extractParams($m, $d));
                 }
             }

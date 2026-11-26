@@ -25,7 +25,8 @@ final readonly class RouteLocatorFactory
         return $source;
     }
 
-    public static function cacheFile(ContainerValue $container): string
+    /** @param list<string> $reservedPaths Other artifact paths owned by the integrating application. */
+    public static function cacheFile(ContainerValue $container, array $reservedPaths = []): string
     {
         $paths = $container->get(PathResolverInterface::class, PathResolverInterface::class);
         $routes = $paths->resolve($container->config->string(ConfigKey::ROUTES_FILE));
@@ -34,10 +35,34 @@ final readonly class RouteLocatorFactory
             throw new InvalidArgumentException(ConfigKey::ROUTES_CACHE_FILE . ' must be a non-empty path.');
         }
         $file = $value === null ? self::cacheFileFor($routes) : $paths->resolve($value);
-        if (strtolower(str_replace('\\', '/', $file)) === strtolower(str_replace('\\', '/', $routes))) {
+        if (self::samePath($file, $routes)) {
             throw new InvalidArgumentException('Routes cache must not overwrite its source file.');
         }
+        foreach ($reservedPaths as $reserved) {
+            if (self::samePath($file, $reserved)) {
+                throw new InvalidArgumentException('Routes cache conflicts with another application artifact: ' . $reserved);
+            }
+        }
         return $file;
+    }
+
+    private static function samePath(string $left, string $right): bool
+    {
+        return self::canonicalPath($left) === self::canonicalPath($right);
+    }
+
+    private static function canonicalPath(string $file): string
+    {
+        clearstatcache(true, $file);
+        // Resolve existing files and parent directories, including directory
+        // symlinks. A reserved destination may not exist until the first build.
+        $resolved = realpath($file);
+        if ($resolved === false) {
+            $parent = realpath(dirname($file));
+            $resolved = $parent === false ? $file : $parent . DIRECTORY_SEPARATOR . basename($file);
+        }
+        $normalized = str_replace('\\', '/', $resolved);
+        return DIRECTORY_SEPARATOR === '\\' ? strtolower($normalized) : $normalized;
     }
 
     public static function cacheFileFor(string $routesFile): string

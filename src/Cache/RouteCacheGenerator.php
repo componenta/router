@@ -20,6 +20,9 @@ use Componenta\Http\Router\Syntax\CurlySyntax;
 use Componenta\Http\Router\Syntax\SquareBracketSyntax;
 use Componenta\Http\Router\Syntax\SyntaxConverter;
 use Componenta\VarExport\VarExport;
+use Componenta\VarExport\ArrayExporter;
+use Componenta\VarExport\EnumExporter;
+use Componenta\VarExport\ScalarExporter;
 
 /**
  * Generates optimized route cache.
@@ -51,7 +54,7 @@ final class RouteCacheGenerator
     public function generate(RouteCollectorInterface $routes, string $cacheFile): void
     {
         $data = $this->compile($routes);
-        $this->writeFile($cacheFile, "<?php\n\ndeclare(strict_types=1);\n\nreturn " . VarExport::withDefaults()->export($data) . ";\n");
+        $this->writeFile($cacheFile, "<?php\n\ndeclare(strict_types=1);\n\nreturn " . (new VarExport(new ScalarExporter(), new ArrayExporter(), new EnumExporter()))->export($data) . ";\n");
     }
 
     /**
@@ -343,7 +346,7 @@ final class RouteCacheGenerator
     {
         $directory = dirname($filename);
 
-        if (!is_dir($directory) && !mkdir($directory, 0755, true)) {
+        if (!is_dir($directory) && !@mkdir($directory, 0755, true) && !is_dir($directory)) {
             throw new RuntimeException("Failed to create directory: $directory");
         }
 
@@ -354,19 +357,25 @@ final class RouteCacheGenerator
         }
 
         try {
-            if (DIRECTORY_SEPARATOR === '/' && !chmod($tempFile, 0600)) {
-                throw new RuntimeException("Failed to secure temporary file: $tempFile");
+            if (DIRECTORY_SEPARATOR === '/') {
+                $stat = fstat($stream);
+                if ($stat === false || !chmod($tempFile, ($stat['mode'] & 0o777) & ~0o022)) {
+                    throw new RuntimeException("Failed to secure temporary file: $tempFile");
+                }
             }
             if (fwrite($stream, $content) !== strlen($content) || !fflush($stream)) {
                 throw new RuntimeException("Failed to write complete file: $tempFile");
             }
-            fclose($stream);
+            if (!fclose($stream)) {
+                throw new RuntimeException("Failed to close temporary file: $tempFile");
+            }
             if (!rename($tempFile, $filename)) {
                 throw new RuntimeException("Failed to publish route cache: $filename");
             }
+            $tempFile = null;
         } finally {
             if (is_resource($stream)) { fclose($stream); }
-            if (is_file($tempFile)) { @unlink($tempFile); }
+            if ($tempFile !== null && is_file($tempFile)) { @unlink($tempFile); }
         }
 
         if (function_exists('opcache_invalidate')) {
