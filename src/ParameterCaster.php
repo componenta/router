@@ -25,7 +25,8 @@ trait ParameterCaster
         // Integer: digits with optional leading minus
         $digits = $value[0] === '-' ? substr($value, 1) : $value;
         if ($digits !== '' && ctype_digit($digits)) {
-            return (int) $value;
+            $number = (int) $value;
+            return (string) $number === $value ? $number : $value;
         }
 
         // Float: digits with decimal point
@@ -34,7 +35,8 @@ trait ParameterCaster
             $before = $value[0] === '-' ? substr($value, 1, $dotPos - 1) : substr($value, 0, $dotPos);
             $after = substr($value, $dotPos + 1);
             if ($before !== '' && ctype_digit($before) && $after !== '' && ctype_digit($after)) {
-                return (float) $value;
+                $number = (float) $value;
+                return is_finite($number) && (string) $number === $value ? $number : $value;
             }
         }
 

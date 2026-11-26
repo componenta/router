@@ -15,6 +15,8 @@ use Componenta\Http\Router\Exception\MethodNotAllowedException;
 use Componenta\Http\Router\Exception\RouteAlreadyExistsException;
 use Componenta\Http\Router\Exception\RouteNotFoundException;
 use Componenta\Http\Router\Exception\RouteNotRegisteredException;
+use Componenta\Http\Router\Exception\RouteConflictException;
+use Componenta\Http\Router\Internal\RouteRegex;
 use Generator;
 
 /**
@@ -126,17 +128,15 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
         $uri = '/' . ltrim($uri, '/');
 
         if (isset($this->staticRoutes[$method][$uri])) {
-            return $this->createMatchResult($this->staticRoutes[$method][$uri], []);
+            return $this->createMatchResult($this->staticRoutes[$method][$uri], $this->staticRoutes[$method][$uri]->defaults);
         }
-
-        $allowedMethods = $this->getAllowedMethodsForStaticUri($uri);
 
         $dynamicResult = $this->matchDynamic($uri, $method);
         if ($dynamicResult !== null) {
             return $dynamicResult;
         }
 
-        $allowedMethods = array_values(array_unique([...$allowedMethods, ...$this->getAllowedMethodsForDynamicUri($uri)]));
+        $allowedMethods = array_values(array_unique([...$this->getAllowedMethodsForStaticUri($uri), ...$this->getAllowedMethodsForDynamicUri($uri)]));
         sort($allowedMethods, SORT_STRING);
 
         if ($allowedMethods !== []) {
@@ -225,14 +225,22 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
                 $route->defaults
             );
             $isStatic = !$compiled->hasParameters();
+            $regex = RouteRegex::anchored($compiled->regex);
+            if (!$isStatic) {
+                RouteRegex::validate($regex);
+            }
 
             foreach ($route->methods as $method) {
                 if ($isStatic) {
+                    $previous = $this->staticRoutes[$method][$route->path] ?? null;
+                    if ($previous !== null) {
+                        throw new RouteConflictException($method, $route->path, $previous->name, $route->name);
+                    }
                     $this->staticRoutes[$method][$route->path] = $route;
                 } else {
                     $this->dynamicRoutes[$method][] = [
                         'route' => $route,
-                        'regex' => '#^' . $compiled->regex . '$#',
+                        'regex' => $regex,
                         'compiled' => $compiled,
                     ];
                 }
@@ -249,7 +257,7 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
         }
 
         foreach ($this->dynamicRoutes[$method] as $data) {
-            if (preg_match($data['regex'], $uri, $matches, PREG_UNMATCHED_AS_NULL)) {
+            if (RouteRegex::match($data['regex'], $uri, $matches)) {
                 $params = $this->extractParameters($matches, $data['compiled']);
 
                 return $this->createMatchResult($data['route'], $params);
@@ -264,7 +272,7 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
         $params = $compiled->defaults;
 
         foreach ($compiled->parameterNames() as $name) {
-            if (isset($matches[$name]) && $matches[$name] !== '') {
+            if (isset($matches[$name])) {
                 $params[$name] = $this->castParameter($matches[$name]);
             }
         }
@@ -296,7 +304,7 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
         $allowed = [];
         foreach ($this->dynamicRoutes as $method => $routes) {
             foreach ($routes as $data) {
-                if (preg_match($data['regex'], $uri)) {
+                if (RouteRegex::match($data['regex'], $uri)) {
                     $allowed[] = $method;
                     break;
                 }

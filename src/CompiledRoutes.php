@@ -15,6 +15,7 @@ use Componenta\Http\Router\Contract\SyntaxParserInterface;
 use Componenta\Http\Router\Exception\MethodNotAllowedException;
 use Componenta\Http\Router\Exception\RouteNotFoundException;
 use Componenta\Http\Router\Exception\RouteNotRegisteredException;
+use Componenta\Http\Router\Exception\RoutePatternException;
 use Componenta\Http\Router\Syntax\ColonSyntax;
 use Componenta\Http\Router\Syntax\AngleBracketSyntax;
 use Componenta\Http\Router\Syntax\CompositeSyntax;
@@ -184,7 +185,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             $data['routeMap'] ?? [],
             $data['dynamicChunks'] ?? [],
             $data['prefixIndex'] ?? [],
-            in_array($data['version'] ?? null, [4, 5, 6, 7, RouteCacheGenerator::CACHE_VERSION], true)
+            in_array($data['version'] ?? null, [4, 5, 6, 7, 8, RouteCacheGenerator::CACHE_VERSION], true)
                 ? ($data['defaultTokens'] ?? CompilerInterface::DEFAULT_PATTERNS)
                 : [],
             $data['routeData'] ?? [],
@@ -340,7 +341,8 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
 
         // Static route lookup - O(1)
         if (isset($this->staticRoutes[$method][$uri])) {
-            return $this->matchResult($this->routeFor($this->staticRoutes[$method][$uri]), []);
+            $route = $this->routeFor($this->staticRoutes[$method][$uri]);
+            return $this->matchResult($route, $route['record']['defaults'] ?? $route['defaults'] ?? []);
         }
 
         // Dynamic matching - unified regex or chunks
@@ -381,9 +383,12 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     {
         if (isset($this->regex[$method])) {
             $map = $this->routeMap[$method];
-            $matched = preg_match($this->regex[$method], $uri, $m);
-            if ($matched === false && count($map) > 1) {
-                return $this->matchSourcePatterns($uri, $method);
+            $matched = @preg_match($this->regex[$method], $uri, $m, PREG_UNMATCHED_AS_NULL);
+            if ($matched === false) {
+                if (count($map) > 1) {
+                    return $this->matchSourcePatterns($uri, $method);
+                }
+                throw new RoutePatternException('Route expression failed: ' . preg_last_error_msg());
             }
             if ($matched === 1) {
                 $d = $this->routeFor(count($map) === 1 ? reset($map) : $map[$m['MARK']]);
@@ -393,9 +398,12 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
 
         foreach ($this->regex as $m => $regex) {
             if ($m === $method) { continue; }
-            $matched = preg_match($regex, $uri);
-            if ($matched === false && count($this->routeMap[$m]) > 1) {
-                return $this->matchSourcePatterns($uri, $method);
+            $matched = @preg_match($regex, $uri);
+            if ($matched === false) {
+                if (count($this->routeMap[$m]) > 1) {
+                    return $this->matchSourcePatterns($uri, $method);
+                }
+                throw new RoutePatternException('Route expression failed: ' . preg_last_error_msg());
             }
             if ($matched === 1) {
                 $allowed[] = $m;
@@ -439,9 +447,12 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 $chunk = $this->dynamicChunks[$method][$chunkIndex];
 
                 $map = $chunk['routeMap'];
-                $matched = preg_match($chunk['regex'], $uri, $m);
-                if ($matched === false && count($map) > 1) {
-                    return $this->matchSourcePatterns($uri, $method);
+                $matched = @preg_match($chunk['regex'], $uri, $m, PREG_UNMATCHED_AS_NULL);
+                if ($matched === false) {
+                    if (count($map) > 1) {
+                        return $this->matchSourcePatterns($uri, $method);
+                    }
+                    throw new RoutePatternException('Route expression failed: ' . preg_last_error_msg());
                 }
                 if ($matched === 1) {
                     $d = $this->routeFor(count($map) === 1 ? reset($map) : $map[$m['MARK']]);
@@ -455,9 +466,12 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 continue;
             }
             foreach ($methodChunks as $chunk) {
-                $matched = preg_match($chunk['regex'], $uri);
-                if ($matched === false && count($chunk['routeMap']) > 1) {
-                    return $this->matchSourcePatterns($uri, $method);
+                $matched = @preg_match($chunk['regex'], $uri);
+                if ($matched === false) {
+                    if (count($chunk['routeMap']) > 1) {
+                        return $this->matchSourcePatterns($uri, $method);
+                    }
+                    throw new RoutePatternException('Route expression failed: ' . preg_last_error_msg());
                 }
                 if ($matched === 1) {
                     $allowed[] = $m;
@@ -491,7 +505,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         $params = $routeData['defaults'] ?? [];
 
         foreach ($routeData['paramNames'] ?? [] as $name) {
-            if (isset($matches[$name]) && $matches[$name] !== '') {
+            if (isset($matches[$name])) {
                 $params[$name] = $this->castParameter($matches[$name]);
             }
         }

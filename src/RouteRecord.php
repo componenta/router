@@ -6,6 +6,7 @@ namespace Componenta\Http\Router;
 
 use InvalidArgumentException;
 use Componenta\Http\Middleware\MiddlewareGroup;
+use Componenta\Http\Router\Internal\RouteRegex;
 
 /**
  * Immutable route definition
@@ -412,7 +413,7 @@ final readonly class RouteRecord
             }
 
             // Validate regex pattern
-            if (@preg_match('#^' . $pattern . '$#', '') === false) {
+            if (@preg_match(RouteRegex::anchored($pattern), '') === false) {
                 throw new InvalidArgumentException("Invalid regex pattern for token '$name': $pattern");
             }
         }

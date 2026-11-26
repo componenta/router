@@ -9,6 +9,8 @@ use Componenta\Http\Router\Compiler;
 use Componenta\Http\Router\Contract\CompilerInterface;
 use Componenta\Http\Router\Contract\RouteCollectorInterface;
 use Componenta\Http\Router\HttpMethod;
+use Componenta\Http\Router\Exception\RouteConflictException;
+use Componenta\Http\Router\Internal\RouteRegex;
 use Componenta\Http\Router\Routes;
 use Componenta\Http\Router\Syntax\AngleBracketSyntax;
 use Componenta\Http\Router\Syntax\ColonSyntax;
@@ -27,15 +29,15 @@ use Componenta\VarExport\VarExport;
  */
 final class RouteCacheGenerator
 {
-    public const int CACHE_VERSION = 8;
+    public const int CACHE_VERSION = 9;
 
     private const int REGEX_LIMIT = 5000;
     private const int CHUNK_SIZE = 50;
     private const int MAX_REGEX_SIZE = 900_000;
 
     public function __construct(
-        public CompilerInterface $compiler = new Compiler(),
-        public SyntaxConverter $converter = new SyntaxConverter(),
+        public readonly CompilerInterface $compiler = new Compiler(),
+        public readonly SyntaxConverter $converter = new SyntaxConverter(),
     ) {}
 
     /**
@@ -100,10 +102,13 @@ final class RouteCacheGenerator
             ];
 
             $parameterNames = $compiled->parameterNames();
+            if ($compiled->hasParameters()) {
+                RouteRegex::validate(RouteRegex::anchored($compiled->regex));
+            }
             if ($compiled->hasParameters() && (
                 in_array('MARK', $parameterNames, true)
                 || !$this->canCombineTokens($compiled->tokens)
-                || !$this->canCompileRegex('#^' . $compiled->regex . '$#')
+                || !$this->canCompileRegex(RouteRegex::anchored($compiled->regex))
             )) {
                 $combineRegex = false;
             }
@@ -136,6 +141,10 @@ final class RouteCacheGenerator
                         'prefix' => $standardSyntax ? $this->getFirstSegment($route->path) : '*',
                     ];
                 } else {
+                    $previous = $staticRoutes[$method][$route->path] ?? null;
+                    if ($previous !== null) {
+                        throw new RouteConflictException($method, $route->path, $previous, $route->name);
+                    }
                     $staticRoutes[$method][$route->path] = $route->name;
                 }
             }
@@ -329,7 +338,7 @@ final class RouteCacheGenerator
     private function buildRegexPattern(array $routes): array
     {
         if (count($routes) === 1) {
-            return ['#^' . $routes[0]['compiled']->regex . '$#', ['r0' => $routes[0]['route']]];
+            return [RouteRegex::anchored($routes[0]['compiled']->regex), ['r0' => $routes[0]['route']]];
         }
 
         $patterns = [];
@@ -341,7 +350,7 @@ final class RouteCacheGenerator
             $routeMap[$mark] = $routeInfo['route'];
         }
 
-        return ['#^(?:' . implode('|', $patterns) . ')$#J', $routeMap];
+        return [RouteRegex::anchored(implode('|', $patterns), 'J'), $routeMap];
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Componenta\Http\Router\Syntax;
 
 use Componenta\Http\Router\Contract\SyntaxParserInterface;
 use InvalidArgumentException;
+use Componenta\Http\Router\Internal\RouteRegex;
 
 /**
  * Base class for bracket-based parameter syntaxes.
@@ -207,7 +208,7 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
                 } else {
                     $value = (string) $params[$name];
 
-                    if (isset($tokens[$name]) && !preg_match('#^' . $tokens[$name] . '$#', $value)) {
+                    if (!RouteRegex::match(RouteRegex::anchored($tokens[$name] ?? self::DEFAULT_PATTERN), $value)) {
                         throw new InvalidArgumentException("Parameter '$name' value '$value' does not match pattern");
                     }
 

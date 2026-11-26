@@ -7,6 +7,7 @@ namespace Componenta\Http\Router;
 use Componenta\Http\Router\Contract\CompilerInterface;
 use Componenta\Http\Router\Contract\SyntaxParserInterface;
 use Componenta\Http\Router\Syntax\CompositeSyntax;
+use Componenta\Http\Router\Internal\RouteRegex;
 
 /**
  * Route pattern compiler
@@ -44,6 +45,10 @@ final readonly class Compiler implements CompilerInterface
         $defaults = array_merge($parsed['defaults'], $defaults);
 
         $regex = $this->syntax->toRegex($pattern, $mergedTokens);
+
+        if ($parsed['parameters'] !== [] || $parsed['optionalParameters'] !== []) {
+            RouteRegex::validate(RouteRegex::anchored($regex));
+        }
 
         return new RouteCompileResult(
             regex: $regex,
