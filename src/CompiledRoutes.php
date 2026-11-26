@@ -16,6 +16,7 @@ use Componenta\Http\Router\Exception\RouteNotRegisteredException;
 use Componenta\Http\Router\Exception\RoutePatternException;
 use Componenta\Http\Router\Internal\RouteRegex;
 use Componenta\Http\Router\Internal\RoutePrefix;
+use Componenta\Http\Router\Internal\RouteMatchIndex;
 use Componenta\Http\Router\Internal\RouteDefinition;
 use Componenta\Http\Router\Internal\PreparedMap;
 use Componenta\Http\Router\Internal\RouteMethodGroups;
@@ -33,7 +34,7 @@ use Generator;
  *
  * Performance characteristics:
  * - Static routes: O(1) hash lookup, zero regex
- * - Dynamic routes: bounded regex chunks selected by literal path prefixes
+ * - Dynamic routes: ordered individual expressions selected by literal path discriminators
  * - Cached RouteRecord instances for public access
  * - Pre-compiled regex patterns in cache
  * - Retains source syntax for URL generation
@@ -41,8 +42,6 @@ use Generator;
 final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface, GeneratorInterface
 {
     private readonly SyntaxParserInterface $sourceSyntax;
-    /** @var array<string, string> */
-    private readonly array $routeKeys;
     public readonly CompilerInterface $compiler;
 
     /** @var array<string, RouteRecord> */
@@ -50,17 +49,13 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
 
     /** @param array<string, string> $defaultTokens */
     private function __construct(
-        private readonly array $staticRoutes,
-        private readonly array $dynamicChunks,
-        private readonly array $prefixIndex,
+        private readonly RouteMatchIndex $index,
         private readonly array $defaultTokens,
         private readonly array $routeData,
         ?SyntaxParserInterface $generationSyntax = null,
         ?SyntaxParserInterface $compilerSyntax = null,
         private readonly bool $explicitGenerationSyntax = true,
-        array $routeKeys = [],
     ) {
-        $this->routeKeys = $routeKeys;
         $this->sourceSyntax = $generationSyntax ?? new CompositeSyntax();
         $this->compiler = new Compiler($compilerSyntax, $defaultTokens);
     }
@@ -86,18 +81,15 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         return self::tryFromArray($data) ?? throw new \InvalidArgumentException('Invalid or incompatible route cache; rebuild from the original source.');
     }
 
-    private static function hydrate(array $data, array $routeKeys): self
+    private static function hydrate(array $data, RouteMatchIndex $index): self
     {
         return new self(
-            $data['staticRoutes'] ?? [],
-            $data['dynamicChunks'] ?? [],
-            $data['prefixIndex'] ?? [],
+            $index,
             $data['defaultTokens'] ?? CompilerInterface::DEFAULT_PATTERNS,
             $data['routeData'] ?? [],
             self::syntaxFromCache(array_key_exists('generationSyntax', $data) ? $data['generationSyntax'] : CompositeSyntax::class),
             self::syntaxFromCache(array_key_exists('compilerSyntax', $data) ? $data['compilerSyntax'] : CompositeSyntax::class),
             $data['explicitGenerationSyntax'] ?? false,
-            $routeKeys,
         );
     }
 
@@ -171,22 +163,22 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     private static function fromCacheData(mixed $data): ?self
     {
         if (!is_array($data) || ($data['version'] ?? null) !== RouteCacheGenerator::CACHE_VERSION || !PreparedMap::valid($data)) { return null; }
-        if (array_diff(array_keys($data), ['version','fingerprint','staticRoutes','dynamicChunks','prefixIndex','methodAliases','defaultTokens','routeData','compilerSyntax','generationSyntax','explicitGenerationSyntax']) !== []) { return null; }
+        if (array_diff(array_keys($data), ['version','fingerprint','staticRoutes','dynamicIndex','methodAliases','defaultTokens','routeData','compilerSyntax','generationSyntax','explicitGenerationSyntax']) !== []) { return null; }
         if (array_key_exists('explicitGenerationSyntax', $data) && !is_bool($data['explicitGenerationSyntax'])) { return null; }
-        foreach (['staticRoutes', 'dynamicChunks', 'prefixIndex', 'methodAliases', 'defaultTokens', 'routeData'] as $key) {
+        foreach (['staticRoutes', 'dynamicIndex', 'methodAliases', 'defaultTokens', 'routeData'] as $key) {
             if (array_key_exists($key, $data) && !is_array($data[$key])) { return null; }
         }
 
         $validated = [];
         $contextCompiler = null;
         if (!self::isTokenShape($data['defaultTokens'] ?? []) || !self::areIndependentPatterns($data['defaultTokens'] ?? [], $validated)) { return null; }
-        $expectedStatic = $expectedDynamic = $pathKeys = [];
+        $expectedStatic = $expectedDynamic = $names = $regexes = $protectMark = [];
         $standardSyntax = ($data['compilerSyntax'] ?? CompositeSyntax::class) === CompositeSyntax::class;
         $defaultTokens = $data['defaultTokens'] ?? CompilerInterface::DEFAULT_PATTERNS;
         $records = $data['routeData'] ?? [];
         foreach ($records as $name => $route) {
             if (!is_array($route) || !is_string($route['path'] ?? null) || !array_key_exists('handler', $route)
-                || array_diff(array_keys($route), ['path','handler','record','methods','middlewares','tokens','defaults','paramNames','optionalParams','group']) !== []) { return null; }
+                || array_diff(array_keys($route), ['path','handler','record','methods','middlewares','tokens','defaults','paramNames','optionalParams','group','regex']) !== []) { return null; }
             $raw = $route['record'] ?? [];
             if (!is_array($raw) || array_diff(array_keys($raw), ['tokens','defaults']) !== []) { return null; }
             foreach (['methods','middlewares','tokens','defaults','paramNames','optionalParams','record'] as $key) {
@@ -223,12 +215,20 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                     || $compiled->optionalParameters !== ($route['optionalParams'] ?? [])
                     || $compiled->parameterNames() !== $paramNames) { return null; }
             }
+            $ordinal = count($names);
+            $names[] = (string) $name;
             if ($paramNames !== []) {
-                $pathKeys[$name] = RoutePrefix::indexedKey($path, $standardSyntax, [...$defaultTokens, ...($route['tokens'] ?? [])], $paramNames);
-            }
+                $regex = $route['regex'] ?? null;
+                $tokens = [...$defaultTokens, ...($route['tokens'] ?? [])];
+                $simple = $standardSyntax ? RouteRegex::simpleExpression($path, $tokens, $paramNames) : null;
+                if (!is_string($regex) || ($simple !== null ? $regex !== $simple : preg_match($regex, '') === false)) { return null; }
+                $regexes[$ordinal] = $regex;
+                if (in_array('MARK', $paramNames, true)) { $protectMark[$ordinal] = true; }
+                $prefix = RoutePrefix::indexedKey($path, $standardSyntax, $tokens, $paramNames);
+            } elseif (array_key_exists('regex', $route)) { return null; }
             foreach ($methods as $method) {
                 if ($paramNames !== []) {
-                    $expectedDynamic[$method][] = (string) $name;
+                    $expectedDynamic[$method][$prefix][] = $ordinal;
                 } else {
                     if (isset($expectedStatic[$method][$path])) { return null; }
                     $expectedStatic[$method][$path] = (string) $name;
@@ -237,52 +237,13 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         }
         if (($data['staticRoutes'] ?? []) !== $expectedStatic) { return null; }
         $aliases = RouteMethodGroups::aliases($expectedDynamic);
-        if (($data['methodAliases'] ?? []) !== $aliases) { return null; }
-        $canonical = array_diff_key($expectedDynamic, $aliases);
+        if (($data['methodAliases'] ?? []) !== $aliases || ($data['dynamicIndex'] ?? []) !== array_diff_key($expectedDynamic, $aliases)) { return null; }
 
-        $seenDynamic = [];
-        $expectedPrefixes = [];
-        $hydratedChunks = [];
-        foreach ($data['dynamicChunks'] ?? [] as $method => $chunks) {
-            if (!is_array($chunks) || !array_is_list($chunks) || $chunks === []) { return null; }
-            foreach ($chunks as $index => $chunk) {
-                if (!is_array($chunk) || !is_array($chunk['routeMap'] ?? null) || $chunk['routeMap'] === []) { return null; }
-                $map = $chunk['routeMap'];
-                if (count($map) > 24 || array_diff(array_keys($chunk), ['regex','routeMap','individual']) !== []) { return null; }
-                if (count($map) > 1) {
-                    $individual = $chunk['individual'] ?? null;
-                    if (array_key_exists('regex', $chunk) || !is_array($individual) || !array_is_list($individual) || count($individual) !== count($map)) { return null; }
-                    if (!array_all($individual, static fn (mixed $expression): bool => is_string($expression))) { return null; }
-                    $chunk['regex'] = RouteRegex::combined($individual);
-                } elseif (array_key_exists('individual', $chunk) || !is_string($chunk['regex'] ?? null)) { return null; }
-                if (preg_match($chunk['regex'], '') === false) { return null; }
-                $hydratedChunks[$method][$index] = $chunk;
-                if (array_keys($map) !== array_map(static fn (int $i): string => 'r' . $i, range(0, count($map) - 1))) { return null; }
-                foreach ($map as $name) {
-                    if (!is_string($name) || !isset($records[$name])) { return null; }
-                    $seenDynamic[$method][] = $name;
-                    $prefix = $pathKeys[$name] ?? null;
-                    if ($prefix === null) { return null; }
-                    $expectedPrefixes[$method][$prefix][$index] = $index;
-                }
-            }
+        $dynamic = [];
+        foreach ($expectedDynamic as $method => $buckets) {
+            $dynamic[$method] = $data['dynamicIndex'][$aliases[$method] ?? $method];
         }
-        if ($seenDynamic !== $canonical) { return null; }
-        foreach ($expectedPrefixes as $method => $prefixes) {
-            $expectedPrefixes[$method] = array_map('array_values', $prefixes);
-        }
-        if (($data['prefixIndex'] ?? []) !== $expectedPrefixes) { return null; }
-
-        // Expand shared immutable arrays in original method order (PHP copy-on-write).
-        $chunks = $prefixes = [];
-        foreach ($expectedDynamic as $method => $_) {
-            $owner = $aliases[$method] ?? $method;
-            $chunks[$method] = $hydratedChunks[$owner];
-            $prefixes[$method] = $data['prefixIndex'][$owner];
-        }
-        $data['dynamicChunks'] = $chunks;
-        $data['prefixIndex'] = $prefixes;
-        return self::hydrate($data, $pathKeys);
+        return self::hydrate($data, new RouteMatchIndex($data['staticRoutes'] ?? [], $dynamic, $names, $regexes, $protectMark));
     }
 
     private static function isTokenShape(array $tokens, bool $nullable = false): bool
@@ -326,132 +287,12 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 : $this->matchGeneric($routes, $uri, $method);
         }
 
-        $method = HttpMethod::normalize($method);
-
-        $uri = str_starts_with($uri, '/') ? $uri : '/' . $uri;
-
-        // Static route lookup - O(1)
-        if (isset($this->staticRoutes[$method][$uri])) {
-            $name = $this->staticRoutes[$method][$uri];
-            return $this->matchResult($name, $this->routeData[$name]['defaults'] ?? []);
-        }
-
-        $allowed = [];
-        $result = $this->matchChunks($uri, $method, $allowed);
-
-        if ($result !== null) {
-            return $result;
-        }
-
-        // Collect allowed methods for static routes only on miss
-        foreach ($this->staticRoutes as $m => $uris) {
-            if (isset($uris[$uri])) {
-                $allowed[] = (string) $m;
-            }
-        }
-
-        if ($allowed !== []) {
-            $allowed = array_values(array_unique($allowed));
-            sort($allowed, SORT_STRING);
-            throw new MethodNotAllowedException($uri, $method, $allowed);
-        }
-
-        throw new RouteNotFoundException($uri, $method);
+        $name = $this->index->find($uri, $method, $matches);
+        $route = $this->routeData[$name];
+        return $this->matchResult($name, RouteParameters::extract($matches, $route['paramNames'] ?? [], $route['defaults'] ?? []));
     }
 
-    /**
-     * Match against chunked regex patterns.
-     *
-     * Uses prefix index to reduce chunks to search.
-     *
-     * @param string $uri URI to match
-     * @param string $method HTTP method
-     * @param array $allowed Allowed methods collector (by reference)
-     * @return MatchResult|null Match result or null if not matched
-     */
-    private function matchChunks(string $uri, string $method, array &$allowed): ?MatchResult
-    {
-        foreach (RoutePrefix::candidates($this->prefixIndex[$method] ?? [], $uri) as $index) {
-            $name = $this->matchChunk($this->dynamicChunks[$method][$index], $uri, $matches);
-            if ($name !== null) {
-                return $this->matchResult($name, $this->extractParams($matches, $this->routeData[$name]));
-            }
-        }
-        foreach ($this->dynamicChunks as $other => $chunks) {
-            if ((string) $other === $method) { continue; }
-            foreach (RoutePrefix::candidates($this->prefixIndex[$other], $uri) as $index) {
-                if ($this->testChunk($chunks[$index], $uri)) {
-                    $allowed[] = (string) $other;
-                    break;
-                }
-            }
-        }
-        return null;
-    }
-
-    private function testChunk(array $chunk, string $uri): bool
-    {
-        $matched = @preg_match($chunk['regex'], $uri);
-        if ($matched !== false) { return $matched === 1; }
-        if (count($chunk['routeMap']) === 1) {
-            throw new RoutePatternException('Route expression failed: ' . preg_last_error_msg());
-        }
-        return $this->matchIndividuals($chunk, $uri, $matches) !== null;
-    }
-
-    private function matchChunk(array $chunk, string $uri, ?array &$matches): ?string
-    {
-        $map = $chunk['routeMap'];
-        if (count($map) === 1) {
-            $name = reset($map);
-            return RouteRegex::match($chunk['regex'], $uri, $matches, in_array('MARK', $this->routeData[$name]['paramNames'] ?? [], true)) ? $name : null;
-        }
-        $matched = @preg_match($chunk['regex'], $uri, $matches, PREG_UNMATCHED_AS_NULL);
-        if ($matched === 0) { return null; }
-        if ($matched === 1 && isset($map[$matches['MARK'] ?? ''])) {
-            return $map[$matches['MARK']];
-        }
-        return $this->matchIndividuals($chunk, $uri, $matches);
-    }
-
-    private function matchIndividuals(array $chunk, string $uri, ?array &$matches): ?string
-    {
-        // Retry only the original eligible expressions, not a newly compiled collection.
-        foreach (array_values($chunk['routeMap']) as $offset => $name) {
-            if (RoutePrefix::accepts($this->routeKeys[$name], $uri)
-                && RouteRegex::match(RouteRegex::anchored($chunk['individual'][$offset]), $uri, $matches)) {
-                return $name;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Extract matched parameters with type coercion.
-     *
-     * Numeric strings are converted to integers or floats.
-     *
-     * @param array $matches Regex matches
-     * @param array $routeData Route data with paramNames and defaults
-     * @return array<string, mixed> Extracted parameters
-     */
-    private function extractParams(array $matches, array $routeData): array
-    {
-        return RouteParameters::extract($matches, $routeData['paramNames'] ?? [], $routeData['defaults'] ?? []);
-    }
-
-    /**
-     * Match against non-compiled route collection.
-     *
-     * Fallback for when routes !== $this. Compiles routes on-the-fly.
-     *
-     * @param RouteCollectorInterface $routes Route collection
-     * @param string $uri URI to match
-     * @param string $method HTTP method
-     * @return MatchResult Match result
-     * @throws MethodNotAllowedException If URI matches but method not allowed
-     * @throws RouteNotFoundException If no route matches
-     */
+    /** Match an external collection using the same source matcher. */
     private function matchGeneric(RouteCollectorInterface $routes, string $uri, string $method): MatchResult
     {
         return (new SourceRouteIndex($routes, $this->compiler))->match($uri, $method);

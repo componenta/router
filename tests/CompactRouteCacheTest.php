@@ -46,7 +46,7 @@ it('stores compact route references and restores omitted defaults', function () 
     expect($data['version'])->toBe(RouteCacheGenerator::CACHE_VERSION)
         ->and($data['staticRoutes']['GET']['/'])->toBe('home.compact')
         ->and($data['staticRoutes']['POST']['/posts'])->toBe('posts.create')
-        ->and($data['dynamicChunks']['GET'][0]['routeMap']['r0'])->toBe('users.show')
+        ->and($data['dynamicIndex']['GET']['/users'])->toBe([2])
         ->and($data['routeData']['home.compact'])->toMatchArray([
             'path' => '/',
             'handler' => 'HomeController',
@@ -81,7 +81,7 @@ it('rejects an obsolete format even when it contains otherwise valid records', f
     $data['version'] = 4;
     $data['regex'] = ['GET' => '#^(?:/items/(?P<MARK>[^/]+)(*MARK:r0)|/other/(?P<id>\d+)(*MARK:r1))$#J'];
     $data['routeMap'] = ['GET' => ['r0' => 'marked', 'r1' => 'other']];
-    unset($data['dynamicChunks'], $data['prefixIndex']);
+    unset($data['dynamicIndex']);
     $file = tempnam(sys_get_temp_dir(), 'route_previous_');
 
     try {

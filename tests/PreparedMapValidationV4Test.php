@@ -22,7 +22,7 @@ it('rejects a prepared map missing a route index or assigning a route to another
     $misdirected['staticRoutes'] = ['POST' => ['/' => 'home']];
     expect(CompiledRoutes::tryFromArray(PreparedMap::seal($misdirected)))->toBeNull();
     $missingDynamic = $map;
-    unset($missingDynamic['dynamicChunks'], $missingDynamic['prefixIndex']);
+    unset($missingDynamic['dynamicIndex']);
     expect(CompiledRoutes::tryFromArray(PreparedMap::seal($missingDynamic)))->toBeNull();
 });
 

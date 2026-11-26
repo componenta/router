@@ -8,7 +8,7 @@ namespace Componenta\Http\Router\Internal;
 final class RouteMethodGroups
 {
     /**
-     * @param array<array-key, list<string>> $routes
+     * @param array<array-key, array<string, list<int>>> $routes
      * @return array<array-key, string>
      */
     public static function aliases(array $routes): array

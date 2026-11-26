@@ -20,7 +20,7 @@ it('distinguishes unsupported preparation settings from invalid route definition
     expect(fn () => $generator->compile($custom))->toThrow(UnsupportedRouteCacheException::class);
     $supported = new Routes(syntax: new SquareBracketSyntax());
     $supported->addRoute(RouteRecord::get('item', '/items/[id]', 'Handler'));
-    expect($generator->compile($supported))->toHaveKey('dynamicChunks');
+    expect($generator->compile($supported))->toHaveKey('dynamicIndex');
 
     $invalid = new Routes();
     $invalid->addRoute(RouteRecord::get('a', '/item', 'A'));

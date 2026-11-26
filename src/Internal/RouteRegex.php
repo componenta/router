@@ -14,14 +14,27 @@ final class RouteRegex
         return '#\A(?:' . $expression . ')\z#' . $modifiers;
     }
 
-    /** @param list<string> $expressions */
-    public static function combined(array $expressions): string
+    /** Derive a known-valid expression for one required whole-segment parameter. */
+    public static function simpleExpression(string $path, array $tokens, array $names): ?string
     {
-        $branches = [];
-        foreach ($expressions as $index => $expression) {
-            $branches[] = '(?:' . $expression . ')(*MARK:r' . $index . ')';
-        }
-        return self::anchored(implode('|', $branches), 'J');
+        if (count($names) !== 1) { return null; }
+        $name = $names[0];
+        $offset = strcspn($path, '[]{}<>:');
+        if ($offset >= strlen($path) || $offset === 0 || $path[$offset - 1] !== '/') { return null; }
+        $placeholder = match ($path[$offset]) {
+            '{' => '{' . $name . '}',
+            '[' => '[' . $name . ']',
+            '<' => '<' . $name . '>',
+            ':' => ':' . $name,
+            default => '',
+        };
+        if ($placeholder === '' || !str_starts_with(substr($path, $offset), $placeholder)) { return null; }
+        $suffix = substr($path, $offset + strlen($placeholder));
+        if (($suffix !== '' && $suffix[0] !== '/') || strcspn($suffix, '[]{}<>:') !== strlen($suffix)) { return null; }
+        if (!InlineConstraint::isName($name) || strlen($name) > 32) { return null; }
+        $token = $tokens[$name] ?? '[^/]+';
+        if ($token !== '[^/]+' && !in_array($token, \Componenta\Http\Router\Contract\CompilerInterface::DEFAULT_PATTERNS, true)) { return null; }
+        return self::anchored(preg_quote(substr($path, 0, $offset), '#') . '(?P<' . $name . '>' . $token . ')' . preg_quote($suffix, '#'));
     }
 
     public static function match(string $regex, string $subject, ?array &$matches = null, bool $protectMark = false): bool

@@ -19,8 +19,7 @@ it('shares only identical ordered dynamic route sets and preserves method behavi
 
     $map = (new RouteCacheGenerator())->compile($source);
     expect($map['methodAliases'])->toBe(['POST' => 'GET', 0 => 'GET'])
-        ->and(array_keys($map['dynamicChunks']))->toBe(['GET', 'CUSTOM'])
-        ->and(array_keys($map['prefixIndex']))->toBe(['GET', 'CUSTOM']);
+        ->and(array_keys($map['dynamicIndex']))->toBe(['GET', 'CUSTOM']);
     $cached = CompiledRoutes::fromArray($map);
     $observe = static function ($routes, string $uri, string $method): array {
         try {

@@ -62,8 +62,8 @@ it('preserves registration order and complete observations across overlapping pr
         expect($prepared->match($prepared, '/api/items/42', 'GET')->name)->toBe('earlier.wildcard');
         expect($prepared->match($prepared, '/private/nested/17', 'GET')->middlewares?->toArray())->toBe(['Auth', 'Policy']);
         $data = require $file;
-        expect(max(array_map(static fn (array $chunk): int => count($chunk['routeMap']), $data['dynamicChunks']['GET'])))->toBeLessThanOrEqual(24);
-        expect(array_any($data['dynamicChunks']['GET'], static fn (array $chunk): bool => count($chunk['routeMap']) > 1))->toBeTrue();
+        expect($data['dynamicIndex']['GET']['/catalog/0'])->toHaveCount(1)
+            ->and($data['routeData']['complex']['regex'])->toBeString();
     } finally { unlink($file); }
 })->with([100, 1000, 5001]);
 
@@ -82,7 +82,7 @@ it('rejects a changed but well-formed prepared expression and reference-backed d
     $source->addRoute(RouteRecord::get('item', '/items/{id}', 'Handler'));
     $map = (new RouteCacheGenerator())->compile($source);
     $altered = $map;
-    $altered['dynamicChunks']['GET'][0]['regex'] = '#\A/items/(?P<id>[a-z]+)\z#';
+    $altered['routeData']['item']['regex'] = '#\A/items/(?P<id>[a-z]+)\z#';
     expect(CompiledRoutes::tryFromArray($altered))->toBeNull();
     $handler = 'Handler';
     $map['routeData']['item']['handler'] =& $handler;
@@ -130,5 +130,5 @@ it('narrows a shared prefix by its guaranteed final literal segment without chan
     }
     expect($prepared->match($prepared, '/items/42/first', 'GET')->name)->toBe('wildcard.first');
     expect($prepared->match($prepared, '/custom/42', 'GET')->name)->toBe('custom');
-    expect($map['prefixIndex']['GET']['!5000:/items'])->toHaveCount(1);
+    expect($map['dynamicIndex']['GET']['!5000:/items'])->toHaveCount(1);
 });
