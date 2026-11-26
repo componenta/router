@@ -18,6 +18,7 @@ use Componenta\Http\Router\Internal\RouteRegex;
 use Componenta\Http\Router\Internal\RoutePrefix;
 use Componenta\Http\Router\Internal\RouteDefinition;
 use Componenta\Http\Router\Internal\PreparedMap;
+use Componenta\Http\Router\Internal\RouteMethodGroups;
 use Componenta\Http\Router\Internal\RouteParameters;
 use Componenta\Http\Router\Internal\SourceRouteIndex;
 use Componenta\Http\Router\Syntax\ColonSyntax;
@@ -166,9 +167,9 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     private static function fromCacheData(mixed $data): ?self
     {
         if (!is_array($data) || ($data['version'] ?? null) !== RouteCacheGenerator::CACHE_VERSION || !PreparedMap::valid($data)) { return null; }
-        if (array_diff(array_keys($data), ['version','fingerprint','staticRoutes','dynamicChunks','prefixIndex','defaultTokens','routeData','compilerSyntax','generationSyntax','explicitGenerationSyntax']) !== []) { return null; }
+        if (array_diff(array_keys($data), ['version','fingerprint','staticRoutes','dynamicChunks','prefixIndex','methodAliases','defaultTokens','routeData','compilerSyntax','generationSyntax','explicitGenerationSyntax']) !== []) { return null; }
         if (array_key_exists('explicitGenerationSyntax', $data) && !is_bool($data['explicitGenerationSyntax'])) { return null; }
-        foreach (['staticRoutes', 'dynamicChunks', 'prefixIndex', 'defaultTokens', 'routeData'] as $key) {
+        foreach (['staticRoutes', 'dynamicChunks', 'prefixIndex', 'methodAliases', 'defaultTokens', 'routeData'] as $key) {
             if (array_key_exists($key, $data) && !is_array($data[$key])) { return null; }
         }
 
@@ -231,6 +232,9 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             }
         }
         if (($data['staticRoutes'] ?? []) !== $expectedStatic) { return null; }
+        $aliases = RouteMethodGroups::aliases($expectedDynamic);
+        if (($data['methodAliases'] ?? []) !== $aliases) { return null; }
+        $canonical = array_diff_key($expectedDynamic, $aliases);
 
         $seenDynamic = [];
         $expectedPrefixes = [];
@@ -251,12 +255,21 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 }
             }
         }
-        if ($seenDynamic !== $expectedDynamic) { return null; }
+        if ($seenDynamic !== $canonical) { return null; }
         foreach ($expectedPrefixes as $method => $prefixes) {
             $expectedPrefixes[$method] = array_map('array_values', $prefixes);
         }
         if (($data['prefixIndex'] ?? []) !== $expectedPrefixes) { return null; }
 
+        // Expand shared immutable arrays in original method order (PHP copy-on-write).
+        $chunks = $prefixes = [];
+        foreach ($expectedDynamic as $method => $_) {
+            $owner = $aliases[$method] ?? $method;
+            $chunks[$method] = $data['dynamicChunks'][$owner];
+            $prefixes[$method] = $data['prefixIndex'][$owner];
+        }
+        $data['dynamicChunks'] = $chunks;
+        $data['prefixIndex'] = $prefixes;
         return self::hydrate($data);
     }
 

@@ -12,6 +12,7 @@ use Componenta\Http\Router\HttpMethod;
 use Componenta\Http\Router\Internal\RouteRegex;
 use Componenta\Http\Router\Internal\RoutePrefix;
 use Componenta\Http\Router\Internal\PreparedMap;
+use Componenta\Http\Router\Internal\RouteMethodGroups;
 use Componenta\Http\Router\Internal\SourceRouteIndex;
 use Componenta\Http\Router\Routes;
 use Componenta\Http\Router\Syntax\AngleBracketSyntax;
@@ -33,7 +34,7 @@ use Componenta\VarExport\ScalarExporter;
  */
 final class RouteCacheGenerator
 {
-    public const int CACHE_VERSION = 12;
+    public const int CACHE_VERSION = 13;
 
     private const int CHUNK_SIZE = 24;
     private const int MAX_REGEX_SIZE = 900_000;
@@ -61,7 +62,7 @@ final class RouteCacheGenerator
      * Separates static and dynamic routes, chooses optimal storage strategy.
      *
      * @param RouteCollectorInterface $routes Routes to compile
-     * @return array{version: int, fingerprint: ?string, staticRoutes?: array, routeData?: array, dynamicChunks?: array, prefixIndex?: array, defaultTokens?: array, generationSyntax?: class-string, compilerSyntax?: class-string, explicitGenerationSyntax?: bool}
+     * @return array{version: int, fingerprint: ?string, staticRoutes?: array, routeData?: array, dynamicChunks?: array, prefixIndex?: array, methodAliases?: array, defaultTokens?: array, generationSyntax?: class-string, compilerSyntax?: class-string, explicitGenerationSyntax?: bool}
      */
     public function compile(RouteCollectorInterface $routes): array
     {
@@ -231,14 +232,16 @@ final class RouteCacheGenerator
      * @param array<string, array<string, string>> $staticRoutes Static routes by method
      * @param array<string, list<array>> $dynamicRoutes Dynamic routes by method
      * @param array<string, array> $routeData All route data indexed by name
-     * @return array{staticRoutes: array, dynamicChunks: array, prefixIndex: array, routeData: array}
+     * @return array{staticRoutes: array, dynamicChunks: array, prefixIndex: array, routeData: array, methodAliases: array}
      */
     private function buildChunkedCache(array $staticRoutes, array $dynamicRoutes, array $routeData): array
     {
         $dynamicChunks = [];
         $prefixIndex = [];
+        $methodAliases = RouteMethodGroups::aliases(array_map(static fn (array $routes): array => array_column($routes, 'route'), $dynamicRoutes));
 
         foreach ($dynamicRoutes as $method => $methodRoutes) {
+            if (isset($methodAliases[$method])) { continue; }
             $dynamicChunks[$method] = [];
 
             for ($offset = 0, $count = count($methodRoutes); $offset < $count;) {
@@ -271,7 +274,7 @@ final class RouteCacheGenerator
             }
         }
 
-        return compact('staticRoutes', 'dynamicChunks', 'prefixIndex', 'routeData');
+        return compact('staticRoutes', 'dynamicChunks', 'prefixIndex', 'routeData', 'methodAliases');
     }
 
     /**
