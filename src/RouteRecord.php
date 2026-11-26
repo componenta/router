@@ -42,6 +42,9 @@ final readonly class RouteRecord
         array $defaults = [],
         public ?string $group = null,
     ) {
+        if ($name === '' || str_contains($name, "\0")) {
+            throw new InvalidArgumentException('Route name must be non-empty and must not contain NUL.');
+        }
         $this->path = self::normalizePath($path);
         $this->methods = self::normalizeMethods($methods ?? [HttpMethod::GET]);
         $this->tokens = self::validateTokens($tokens);

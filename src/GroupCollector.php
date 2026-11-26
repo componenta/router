@@ -22,6 +22,9 @@ final class GroupCollector implements IteratorAggregate, Arrayable
      */
     public function add(RouteGroup $group): void
     {
+        if (isset($this->groups[$group->fullName])) {
+            throw new \LogicException(sprintf('Route group "%s" is already registered.', $group->fullName));
+        }
         $this->groups[$group->fullName] = $group;
     }
 

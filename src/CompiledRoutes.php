@@ -44,7 +44,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     private ?Routes $runtimeRoutes = null;
     private bool $matchingStarted = false;
     private bool $runtimeMatching = false;
-    public CompilerInterface $compiler;
+    public readonly CompilerInterface $compiler;
     public SyntaxConverterInterface $syntaxConverter;
 
     /** @var array<string, RouteHandler> */
@@ -472,10 +472,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     private function matchSourcePatterns(string $uri, string $method): MatchResult
     {
         // Combined expressions can exhaust PCRE limits before individual routes do.
-        $source = new Routes($this->cachedCompiler);
-        foreach ($this as $route) {
-            $source->addRoute($route);
-        }
+        $source = Routes::fromResolved($this, $this->cachedCompiler);
 
         return $source->match($source, $uri, $method);
     }
@@ -516,44 +513,8 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
      */
     private function matchGeneric(RouteCollectorInterface $routes, string $uri, string $method): MatchResult
     {
-        $method = strtoupper($method);
-        $uri = '/' . ltrim($uri, '/');
-        $allowed = [];
-
-        foreach ($routes as $route) {
-            $compiled = $this->compiler->compile(
-                $route->path,
-                $route->tokens,
-                $route->defaults
-            );
-
-            if (!$compiled->hasParameters()) {
-                if ($route->path === $uri) {
-                    if ($route->allow($method)) {
-                        return new MatchResult($route->name, $route->handler, $route->middlewares, [], $route);
-                    }
-                    array_push($allowed, ...$route->methods);
-                }
-            } elseif (preg_match('#^' . $compiled->regex . '$#', $uri, $m)) {
-                if ($route->allow($method)) {
-                    $params = $compiled->defaults;
-                    foreach ($compiled->parameterNames() as $name) {
-                        if (isset($m[$name]) && $m[$name] !== '') {
-                            $params[$name] = $this->castParameter($m[$name]);
-                        }
-                    }
-                    return new MatchResult($route->name, $route->handler, $route->middlewares, $params, $route);
-                }
-                array_push($allowed, ...$route->methods);
-            }
-        }
-
-        if ($allowed !== []) {
-            $allowed = array_values(array_unique($allowed));
-            sort($allowed, SORT_STRING);
-            throw new MethodNotAllowedException($uri, $method, $allowed);
-        }
-        throw new RouteNotFoundException($uri, $method);
+        $source = Routes::fromResolved($routes, $this->compiler, $this->explicitGenerationSyntax ? $this->sourceSyntax : null);
+        return $source->match($source, $uri, $method);
     }
 
     /**
@@ -606,14 +567,11 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
 
     private function runtimeRoutes(): Routes
     {
-        if ($this->runtimeRoutes === null) {
-            $this->runtimeRoutes = new Routes($this->compiler, $this->explicitGenerationSyntax ? $this->sourceSyntax : null);
-            foreach ($this as $route) {
-                $this->runtimeRoutes->addRoute($route);
-            }
-        }
-        $this->runtimeRoutes->compiler = $this->compiler;
-        return $this->runtimeRoutes;
+        return $this->runtimeRoutes ??= Routes::fromResolved(
+            $this,
+            $this->compiler,
+            $this->explicitGenerationSyntax ? $this->sourceSyntax : null,
+        );
     }
 
     /**

@@ -67,34 +67,26 @@ final readonly class RouteGroup
         ];
     }
 
-    /**
-     * Adds a route to the group.
-     *
-     * Applies group settings: name prefix, path prefix, tokens, defaults,
-     * and merges middleware from group with route middleware. The mutated
-     * name is tagged with {@see Routes::PROCESSED_SENTINEL} so the parent
-     * collection stores the record without re-delegating.
-     */
+    /** Registers a source route through this group's parent collection. */
     public function addRoute(RouteRecord $route): self
     {
-        // Merge: group middleware + route middleware
-        $routeMiddleware = $route->middlewares?->toArray() ?? [];
-        $allMiddleware = [...$this->inheritedMiddleware, ...$routeMiddleware];
+        $this->routes->addRoute($route->withGroup($this->fullName));
+        return $this;
+    }
 
-        $mutated = new RouteRecord(
-            name: Routes::PROCESSED_SENTINEL . "$this->fullName.$route->name",
+    /** @internal Apply inherited group metadata without registering the route. */
+    public function apply(RouteRecord $route): RouteRecord
+    {
+        return new RouteRecord(
+            name: $this->fullName . '.' . $route->name,
             path: $this->fullPrefix . $route->path,
             handler: $route->handler,
             methods: $route->methods,
-            middlewares: $allMiddleware,
+            middlewares: [...$this->inheritedMiddleware, ...($route->middlewares?->toArray() ?? [])],
             tokens: [...$this->inheritedTokens, ...$route->tokens],
             defaults: [...$this->inheritedDefaults, ...$route->defaults],
             group: $this->fullName,
         );
-
-        $this->routes->addRoute($mutated);
-
-        return $this;
     }
 
     public function get(string $name, string $path, mixed $handler): self

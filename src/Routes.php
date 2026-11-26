@@ -24,16 +24,6 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
 {
     use ParameterCaster;
 
-    /**
-     * NUL-byte marker that {@see RouteGroup::addRoute()} prepends to a mutated
-     * record's name to signal "this route has been processed by its group". On
-     * the next call to {@see self::addRoute()}, the sentinel is stripped and the
-     * record is stored without re-delegating, which is what breaks the
-     * Routes -> Group -> Routes cycle. NUL is unreachable in any legitimate
-     * route name, which makes it safe as an internal marker.
-     */
-    public const string PROCESSED_SENTINEL = "\0";
-
     /** @var array<string, RouteRecord> */
     private array $routes = [];
 
@@ -48,43 +38,46 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
     private bool $compiled = false;
 
     public function __construct(
-        public CompilerInterface $compiler = new Compiler(),
+        public readonly CompilerInterface $compiler = new Compiler(),
         public readonly ?SyntaxParserInterface $syntax = null,
     ) {
         $this->groups = new GroupCollector();
     }
 
-    /**
-     * Adds a route to the collection.
-     *
-     * If route has a group specified and that group exists, the route
-     * is added through the group to apply its settings (prefix, middleware, etc.).
-     *
-     * @throws RouteAlreadyExistsException If route with this name already exists
-     */
+    /** Register a source definition, applying its named group exactly once. */
     public function addRoute(RouteRecord $route): self
     {
-        // The NUL-byte sentinel is the marker {@see RouteGroup::addRoute()} prepends
-        // to a record after applying its prefixes/middleware, signalling "already
-        // processed - just store me". If we see it, strip and store directly. If we
-        // don't see it and the route names a registered group, delegate; the group
-        // will mutate the record (adding its prefixes) and re-enter this method,
-        // this time with the sentinel set.
-        if (str_contains($route->name, self::PROCESSED_SENTINEL)) {
-            $route = $route->withName(str_replace(self::PROCESSED_SENTINEL, '', $route->name));
-        } elseif ($route->group !== null && $this->groups->has($route->group)) {
-            $this->groups->get($route->group)->addRoute($route);
-            return $this;
-        }
+        $resolved = $route->group === null
+            ? $route
+            : $this->groups->get($route->group)->apply($route);
+        $this->store($resolved);
+        return $this;
+    }
 
+    /**
+     * Reconstruct a collection from effective route records, not source definitions.
+     * @internal Used by matchers and cache restoration. Groups have already been applied.
+     * @param iterable<RouteRecord> $records
+     */
+    public static function fromResolved(
+        iterable $records,
+        CompilerInterface $compiler = new Compiler(),
+        ?SyntaxParserInterface $syntax = null,
+    ): self {
+        $routes = new self($compiler, $syntax);
+        foreach ($records as $record) {
+            $routes->store($record);
+        }
+        return $routes;
+    }
+
+    private function store(RouteRecord $route): void
+    {
         if (isset($this->routes[$route->name])) {
             throw new RouteAlreadyExistsException($route->name);
         }
-
         $this->routes[$route->name] = $route;
         $this->compiled = false;
-
-        return $this;
     }
 
     /**
@@ -155,43 +148,8 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
 
     private function matchGeneric(RouteCollectorInterface $routes, string $uri, string $method): MatchResult
     {
-        $method = strtoupper($method);
-        $uri = '/' . ltrim($uri, '/');
-        $allowedMethods = [];
-
-        foreach ($routes as $route) {
-            $compiled = $this->compiler->compile(
-                $route->path,
-                $route->tokens,
-                $route->defaults
-            );
-
-            if (!$compiled->hasParameters()) {
-                if ($route->path === $uri) {
-                    if ($route->allow($method)) {
-                        return new MatchResult($route->name, $route->handler, $route->middlewares, [], $route);
-                    }
-                    $allowedMethods = [...$allowedMethods, ...$route->methods];
-                }
-            } else {
-                if (preg_match('#^' . $compiled->regex . '$#', $uri, $matches, PREG_UNMATCHED_AS_NULL)) {
-                    if ($route->allow($method)) {
-                        $params = $this->extractParameters($matches, $compiled);
-
-                        return new MatchResult($route->name, $route->handler, $route->middlewares, $params, $route);
-                    }
-                    $allowedMethods = [...$allowedMethods, ...$route->methods];
-                }
-            }
-        }
-
-        if ($allowedMethods !== []) {
-            $allowedMethods = array_values(array_unique($allowedMethods));
-            sort($allowedMethods, SORT_STRING);
-            throw new MethodNotAllowedException($uri, $method, $allowedMethods);
-        }
-
-        throw new RouteNotFoundException($uri, $method);
+        $source = self::fromResolved($routes, $this->compiler, $this->syntax);
+        return $source->match($source, $uri, $method);
     }
 
     public function generate(RouteCollectorInterface $routes, string $name, array $parameters = []): string
