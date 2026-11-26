@@ -57,7 +57,7 @@ describe('RouteHandlerMiddleware', function () {
     it('delegates route handler invocation to the executor', function () {
         $executor = new RouteHandlerMiddlewareCountingExecutor();
         $middleware = new RouteHandlerMiddleware(
-            static fn (ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface => new Response(201),
+            static fn (ServerRequestInterface $incoming, RequestHandlerInterface $next): ResponseInterface => new Response(201),
             $executor,
         );
 
@@ -68,8 +68,8 @@ describe('RouteHandlerMiddleware', function () {
         expect($response->getStatusCode())->toBe(201)
             ->and($executor->calls)->toBe(1)
             ->and($executor->params)->toBe([
-                'request' => $request,
-                'handler' => $terminal,
+                ServerRequestInterface::class => $request,
+                RequestHandlerInterface::class => $terminal,
             ]);
     });
 

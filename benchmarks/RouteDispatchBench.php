@@ -8,7 +8,6 @@ use Componenta\DI\CallableExecutorInterface;
 use Componenta\Http\Middleware\MiddlewareFactory;
 use Componenta\Http\Middleware\MiddlewareGroup;
 use Componenta\Http\Middleware\Resolver\CompositeResolver;
-use Componenta\Http\Middleware\Resolver\MiddlewareGroupResolver;
 use Componenta\Http\Router\MatchResult;
 use Componenta\Http\Router\Middleware\DispatchRouteMiddleware;
 use Componenta\Http\Router\Middleware\MatchRouteMiddleware;
@@ -41,7 +40,6 @@ final class RouteDispatchBench
     {
         $executor = new BenchmarkCallableExecutor();
         $resolver = new CompositeResolver(
-            new MiddlewareGroupResolver(),
             new RouteHandlerResolver($executor),
         );
 

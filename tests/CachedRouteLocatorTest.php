@@ -10,25 +10,15 @@ use Componenta\Http\Router\RouteRecord;
 use Componenta\Http\Router\Routes;
 use Componenta\Http\Router\CompiledRoutes;
 
-it('accepts a generated static index with a route shadowed for one method', function (): void {
+it('rejects a static method and path conflict in both matching and compilation', function (): void {
     $source = new Routes();
     $source->addRoute(new RouteRecord('original', '/items', 'OriginalHandler', ['GET', 'POST']));
     $source->addRoute(RouteRecord::get('replacement', '/items', 'ReplacementHandler'));
-    $file = tempnam(sys_get_temp_dir(), 'route_shadow_');
-    if ($file === false) { throw new RuntimeException('Cannot create route cache fixture.'); }
 
-    try {
-        (new RouteCacheGenerator())->generate($source, $file);
-        $compiled = CompiledRoutes::tryFromCache($file);
-        expect($compiled)->toBeInstanceOf(CompiledRoutes::class);
-        foreach ([$source, $compiled] as $routes) {
-            expect($routes->match($routes, '/items', 'GET')->name)->toBe('replacement')
-                ->and($routes->match($routes, '/items', 'POST')->name)->toBe('original')
-                ->and($routes->getRoute('original')->handler->value)->toBe('OriginalHandler');
-        }
-    } finally {
-        unlink($file);
-    }
+    expect(fn () => $source->match($source, '/items', 'GET'))
+        ->toThrow(\Componenta\Http\Router\Exception\RouteConflictException::class)
+        ->and(fn () => (new RouteCacheGenerator())->compile($source))
+        ->toThrow(\Componenta\Http\Router\Exception\RouteConflictException::class);
 });
 
 it('accepts a generated empty map without invoking the source', function (): void {

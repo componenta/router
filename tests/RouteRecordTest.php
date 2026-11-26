@@ -32,16 +32,16 @@ it('keeps root path as slash', function () {
 
 // --- Method normalization ---
 
-it('normalizes methods to uppercase', function () {
+it('preserves case-sensitive HTTP method tokens', function () {
     $route = new RouteRecord('test', '/', 'handler', ['get', 'post']);
 
-    expect($route->methods)->toBe(['GET', 'POST']);
+    expect($route->methods)->toBe(['get', 'post']);
 });
 
 it('deduplicates methods', function () {
     $route = new RouteRecord('test', '/', 'handler', ['GET', 'get', 'GET']);
 
-    expect($route->methods)->toBe(['GET']);
+    expect($route->methods)->toBe(['GET', 'get']);
 });
 
 it('throws on empty methods', function () {
@@ -55,7 +55,7 @@ it('checks if method is allowed', function () {
     $route = RouteRecord::get('test', '/', 'handler');
 
     expect($route->allow('GET'))->toBeTrue()
-        ->and($route->allow('get'))->toBeTrue()
+        ->and($route->allow('get'))->toBeFalse()
         ->and($route->allow('POST'))->toBeFalse();
 });
 

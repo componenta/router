@@ -1,6 +1,6 @@
 # Componenta Router
 
-Supports Componenta Config 3 or 4 and DI 5 or 6. DI 6 requires PHP 8.5.13 or newer.
+Requires PHP 8.5.13 or newer, Componenta Config 4, DI 6, HTTP Responder 2 and Middleware Factory 3.
 
 Runtime HTTP router for Componenta applications. The package provides immutable route records, fluent route building, route groups, route collections, path pattern compilation, optimized compiled routes, URL generation, PSR-15 route matching and dispatch middleware, handler resolution, and router exception handlers.
 

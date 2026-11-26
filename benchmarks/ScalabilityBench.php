@@ -31,6 +31,7 @@ class ScalabilityBench
         yield '100 routes' => ['count' => 100];
         yield '500 routes' => ['count' => 500];
         yield '1000 routes' => ['count' => 1000];
+        yield '10000 routes' => ['count' => 10000];
     }
 
     public function setUpRoutes(array $params): void

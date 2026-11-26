@@ -34,7 +34,10 @@ final readonly class RouteHandlerMiddleware implements MiddlewareInterface
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        $result = $this->executor->call($this->handler, compact('request', 'handler'));
+        $result = $this->executor->call($this->handler, [
+            ServerRequestInterface::class => $request,
+            RequestHandlerInterface::class => $handler,
+        ]);
 
         return $this->resolveResult($result, $request, $handler);
     }

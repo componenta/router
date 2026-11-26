@@ -48,7 +48,7 @@ it('preserves the complete public route record in a compact cache', function ():
 it('uses custom compiler defaults for generation while preserving explicit public tokens', function (): void {
     $compiler = new Compiler(defaultPatterns: ['id' => '[A-Z]+']);
     $generator = new RouteCacheGenerator($compiler);
-    $routes = new Routes();
+    $routes = new Routes($compiler);
     $routes->addRoute(RouteRecord::get(
         'users.show',
         '/users/{id}',

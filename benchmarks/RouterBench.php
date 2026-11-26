@@ -59,7 +59,7 @@ class RouterBench
 
         // Optional parameter routes (50)
         for ($i = 0; $i < 50; $i++) {
-            self::$routes->addRoute(RouteRecord::get("optional.$i", '/optional/' . $i . '[?page:\d+]', "OptionalController@action$i"));
+            self::$routes->addRoute(RouteRecord::get("optional.$i", '/optional/' . $i . '/[?page:\d+]', "OptionalController@action$i"));
         }
 
         // Generate cache once
