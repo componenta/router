@@ -8,6 +8,7 @@ use RuntimeException;
 use Componenta\Http\Router\Compiler;
 use Componenta\Http\Router\Contract\CompilerInterface;
 use Componenta\Http\Router\Contract\RouteCollectorInterface;
+use Componenta\Http\Router\Exception\UnsupportedRouteCacheException;
 use Componenta\Http\Router\HttpMethod;
 use Componenta\Http\Router\Internal\RouteRegex;
 use Componenta\Http\Router\Internal\RoutePrefix;
@@ -67,11 +68,11 @@ final class RouteCacheGenerator
     public function compile(RouteCollectorInterface $routes): array
     {
         if (!$this->compiler instanceof Compiler) {
-            throw new RuntimeException('Route compiler cannot be preserved in a cache; use the original route source.');
+            throw new UnsupportedRouteCacheException('Route compiler cannot be preserved in a cache; use the original route source.');
         }
 
         if ($routes instanceof Routes && $routes->compiler != $this->compiler) {
-            throw new RuntimeException('Route cache must use the source collection compiler.');
+            throw new UnsupportedRouteCacheException('Route cache must use the source collection compiler.');
         }
 
         $syntax = $routes instanceof Routes && $routes->syntax !== null
@@ -82,7 +83,7 @@ final class RouteCacheGenerator
                 CompositeSyntax::class, CurlySyntax::class, SquareBracketSyntax::class,
                 AngleBracketSyntax::class, ColonSyntax::class,
             ], true) || ($parser instanceof CompositeSyntax && $parser != new CompositeSyntax())) {
-                throw new RuntimeException(sprintf('Route %s syntax cannot be preserved in a cache; use the original route source.', $role));
+                throw new UnsupportedRouteCacheException(sprintf('Route %s syntax cannot be preserved in a cache; use the original route source.', $role));
             }
         }
 
