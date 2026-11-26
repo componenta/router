@@ -77,9 +77,8 @@ final readonly class CompositeSyntax implements SyntaxParserInterface
     {
         $outer = [];
         $offset = 0;
-        while (preg_match('~\{[A-Za-z_]|\[\??[A-Za-z_]|<[A-Za-z_]|(?:\A|(?<=/)):[A-Za-z_]~', $pattern, $match, PREG_OFFSET_CAPTURE, $offset) === 1) {
-            [$startText, $start] = $match[0];
-            $marker = $startText[0];
+        while (($placeholder = InlineConstraint::nextPlaceholder($pattern, $offset)) !== null) {
+            [$start, $marker] = $placeholder;
             if ($marker === ':') {
                 $outer[ColonSyntax::class] = true;
                 $offset = InlineConstraint::colonParameter($pattern, $start)['end'];

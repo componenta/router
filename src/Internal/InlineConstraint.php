@@ -9,6 +9,36 @@ use InvalidArgumentException;
 /** @internal Lexical boundaries for inline PCRE constraints, not a PCRE validator. */
 final class InlineConstraint
 {
+    private const string NAME_START = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_';
+    private const string NAME_CHARS = self::NAME_START . '0123456789';
+
+    public static function nameAt(string $text, int $offset): ?string
+    {
+        if (!isset($text[$offset]) || !str_contains(self::NAME_START, $text[$offset])) { return null; }
+        return substr($text, $offset, strspn($text, self::NAME_CHARS, $offset));
+    }
+
+    public static function isName(string $name): bool
+    {
+        return $name !== '' && self::nameAt($name, 0) === $name;
+    }
+
+    /** @return array{int, string}|null */
+    public static function nextPlaceholder(string $text, int $offset = 0, string $markers = '{[<:'): ?array
+    {
+        $length = strlen($text);
+        while ($offset < $length) {
+            $start = $offset + strcspn($text, $markers, $offset);
+            if ($start >= $length) { return null; }
+            $marker = $text[$start];
+            $offset = $start + 1;
+            if ($marker === ':' && $start > 0 && $text[$start - 1] !== '/') { continue; }
+            $nameStart = $offset + (int) ($marker === '[' && ($text[$offset] ?? '') === '?');
+            if (self::nameAt($text, $nameStart) !== null) { return [$start, $marker]; }
+        }
+        return null;
+    }
+
     /**
      * Locate a delimiter outside escaped characters, character classes and
      * balanced regex groups. PCRE itself validates the resulting expression.
@@ -76,10 +106,10 @@ final class InlineConstraint
     public static function bracketEnd(string $text, int $start, string $close): int|false
     {
         // The name and default are not regex source.
-        if (!preg_match('/\G\??[A-Za-z_][A-Za-z0-9_]*/', $text, $match, 0, $start + 1)) {
-            return strpos($text, $close, $start + 1);
-        }
-        $offset = $start + 1 + strlen($match[0]);
+        $nameStart = $start + 1 + (int) (($text[$start + 1] ?? '') === '?');
+        $name = self::nameAt($text, $nameStart);
+        if ($name === null) { return strpos($text, $close, $start + 1); }
+        $offset = $nameStart + strlen($name);
         if (($text[$offset] ?? '') !== ':') {
             return strpos($text, $close, $offset);
         }
@@ -92,10 +122,11 @@ final class InlineConstraint
     public static function bracketParameter(string $text, bool $prefixOptional): array
     {
         $empty = ['name' => '', 'constraint' => null, 'optional' => false, 'default' => null];
-        $namePattern = $prefixOptional ? '/\A(\??)([A-Za-z_][A-Za-z0-9_]*)(.*)\z/s' : '/\A()([A-Za-z_][A-Za-z0-9_]*)(.*)\z/s';
-        if (!preg_match($namePattern, $text, $match)) { return $empty; }
-        [, $marker, $name, $rest] = $match;
-        $optional = $marker === '?';
+        $optional = $prefixOptional && str_starts_with($text, '?');
+        $nameStart = (int) $optional;
+        $name = self::nameAt($text, $nameStart);
+        if ($name === null) { return $empty; }
+        $rest = substr($text, $nameStart + strlen($name));
         $default = $constraint = null;
         if (str_starts_with($rest, ':')) {
             $constraint = substr($rest, 1);
@@ -138,11 +169,11 @@ final class InlineConstraint
      */
     public static function colonParameter(string $text, int $start): array
     {
-        if (!preg_match('/\G:([A-Za-z_][A-Za-z0-9_]*)/', $text, $match, 0, $start)) {
+        $name = self::nameAt($text, $start + 1);
+        if (($text[$start] ?? '') !== ':' || $name === null) {
             throw new InvalidArgumentException('Malformed colon route parameter.');
         }
-        $name = $match[1];
-        $end = $start + strlen($match[0]);
+        $end = $start + 1 + strlen($name);
         $constraint = $default = null;
         $optional = false;
         if (($text[$end] ?? '') === '(') {

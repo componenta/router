@@ -21,7 +21,7 @@ final class AngleBracketSyntax extends AbstractBracketSyntax
 {
     public function canParse(string $pattern): bool
     {
-        return (bool) preg_match('/<[a-zA-Z_]/', $pattern);
+        return InlineConstraint::nextPlaceholder($pattern, 0, '<') !== null;
     }
 
     protected function openChar(): string

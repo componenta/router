@@ -34,12 +34,12 @@ it('preserves route matching observations after PCRE resource limits change', fu
         ] as $index => $path) {
             $source->addRoute(new RouteRecord('r' . $index, $prefix . $path, 'Handler', ['GET', 'POST']));
         }
-        $source->addRoute(RouteRecord::get('custom', $prefix . '/custom/{value}', 'Custom', tokens: ['value' => 'a+a+a+a+a+b']));
-        $source->addRoute(RouteRecord::get('later', $prefix . '/custom/{other}', 'Later'));
+        $source->addRoute(RouteRecord::get('custom', $prefix . '-custom/{value}', 'Custom', tokens: ['value' => 'a+a+a+a+a+b']));
+        $source->addRoute(RouteRecord::get('later', $prefix . '-custom/{other}', 'Later'));
         $map = (new RouteCacheGenerator())->compile($source);
         $prepared = CompiledRoutes::fromArray($map);
         $uris = [$prefix, $prefix . '/a', $prefix . '/abc/42', $prefix . '/a/b/end',
-            $prefix . '/custom/aaaaab', $prefix . '/custom/' . str_repeat('a', 100) . 'c', '/missing'];
+            $prefix . '-custom/aaaaab', $prefix . '-custom/' . str_repeat('a', 100) . 'c', '/missing'];
         // Build the source index before changing runtime PCRE limits.
         foreach ($uris as $uri) {
             $observe($source, $uri, 'GET');
@@ -72,5 +72,34 @@ it('stores individual expressions once and rejects missing or malformed fallback
         $changed = $map;
         $changed['dynamicChunks']['GET'][0]['individual'] = $branches;
         expect(CompiledRoutes::tryFromArray(PreparedMap::seal($changed)))->toBeNull();
+    }
+});
+
+
+it('does not interpret a parameterized pattern as static under restrictive PCRE limits', function (string $pattern): void {
+    $oldJit = ini_get('pcre.jit');
+    $oldLimit = ini_get('pcre.backtrack_limit');
+    try {
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '1');
+        $compiler = new \Componenta\Http\Router\Compiler();
+        $compiled = $compiler->compile('/lexer-' . bin2hex(random_bytes(4)) . '/' . $pattern);
+        expect($compiled->parameterNames())->toBe(['id']);
+    } finally {
+        ini_set('pcre.backtrack_limit', (string) $oldLimit);
+        ini_set('pcre.jit', (string) $oldJit);
+    }
+})->with(['{id}', '[id]', '<id>', ':id']);
+
+it('rejects control bytes in generated values regardless of PCRE limits', function (): void {
+    $previous = ini_get('pcre.backtrack_limit');
+    try {
+        ini_set('pcre.backtrack_limit', '1');
+        foreach (array_merge(range(0, 31), [127]) as $byte) {
+            expect(fn () => \Componenta\Http\Router\Internal\PathParameter::encode('a' . chr($byte) . 'b', 'value'))
+                ->toThrow(InvalidArgumentException::class);
+        }
+    } finally {
+        ini_set('pcre.backtrack_limit', (string) $previous);
     }
 });

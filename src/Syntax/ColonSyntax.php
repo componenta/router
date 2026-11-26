@@ -12,12 +12,11 @@ use InvalidArgumentException;
 /** Colon placeholders, e.g. /items/:id(\d+) or /pages/:page?=1. */
 final class ColonSyntax implements SyntaxParserInterface
 {
-    private const string START = '/(?:\A|(?<=\/)):[A-Za-z_]/';
     private const string DEFAULT_PATTERN = '[^/]+';
 
     public function canParse(string $pattern): bool
     {
-        return preg_match(self::START, $pattern) === 1;
+        return InlineConstraint::nextPlaceholder($pattern, 0, ':') !== null;
     }
 
     /** @return iterable<array{name: string, constraint: ?string, optional: bool, default: ?string, end: int, start: int}> */
@@ -25,8 +24,8 @@ final class ColonSyntax implements SyntaxParserInterface
     {
         $offset = 0;
         $seen = [];
-        while (preg_match(self::START, $pattern, $match, PREG_OFFSET_CAPTURE, $offset) === 1) {
-            $start = $match[0][1];
+        while (($placeholder = InlineConstraint::nextPlaceholder($pattern, $offset, ':')) !== null) {
+            [$start] = $placeholder;
             $parameter = InlineConstraint::colonParameter($pattern, $start);
             $name = $parameter['name'];
             if (isset($seen[$name])) {

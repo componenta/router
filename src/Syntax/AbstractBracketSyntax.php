@@ -7,6 +7,7 @@ namespace Componenta\Http\Router\Syntax;
 use Componenta\Http\Router\Contract\SyntaxParserInterface;
 use InvalidArgumentException;
 use Componenta\Http\Router\Internal\PathParameter;
+use Componenta\Http\Router\Internal\InlineConstraint;
 
 /**
  * Base class for bracket-based parameter syntaxes.
@@ -61,7 +62,7 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
     protected function isValidParam(array $parsed): bool
     {
         $name = $parsed['name'];
-        return $name !== '' && preg_match('/\A[A-Za-z_][A-Za-z0-9_]*\z/', $name) === 1;
+        return InlineConstraint::isName($name);
     }
 
     public function parse(string $pattern): array

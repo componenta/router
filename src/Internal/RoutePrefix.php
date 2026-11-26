@@ -26,12 +26,28 @@ final class RoutePrefix
         if ($segment === '' || strspn($segment, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._~-') !== strlen($segment)) { return $prefix; }
         // Only whole literal segments in simple built-in templates and known
         // safe token expressions qualify. Uncertain expressions retain the prefix-only path.
-        if (preg_match('#\A(?:/(?:[a-zA-Z0-9._~-]+|\{[a-zA-Z_][a-zA-Z0-9_]*\??\}|\[\??[a-zA-Z_][a-zA-Z0-9_]*\]|<[a-zA-Z_][a-zA-Z0-9_]*\??>|:[a-zA-Z_][a-zA-Z0-9_]*\??))+\z#D', $path) !== 1) { return $prefix; }
+        foreach (explode('/', substr($path, 1)) as $part) {
+            if ($part === '') { return $prefix; }
+            if (strspn($part, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._~-') === strlen($part)) { continue; }
+            $name = match ($part[0]) {
+                '{' => str_ends_with($part, '}') ? self::withoutOptionalSuffix(substr($part, 1, -1)) : '',
+                '[' => str_ends_with($part, ']') ? (str_starts_with($part, '[?') ? substr($part, 2, -1) : substr($part, 1, -1)) : '',
+                '<' => str_ends_with($part, '>') ? self::withoutOptionalSuffix(substr($part, 1, -1)) : '',
+                ':' => self::withoutOptionalSuffix(substr($part, 1)),
+                default => '',
+            };
+            if (!InlineConstraint::isName($name)) { return $prefix; }
+        }
         foreach ($names as $name) {
             $token = $tokens[$name] ?? '[^/]+';
             if ($token !== '[^/]+' && !in_array($token, CompilerInterface::DEFAULT_PATTERNS, true)) { return $prefix; }
         }
         return self::suffixKey($prefix, $segment);
+    }
+
+    private static function withoutOptionalSuffix(string $value): string
+    {
+        return str_ends_with($value, '?') ? substr($value, 0, -1) : $value;
     }
 
     public static function accepts(string $key, string $uri): bool
