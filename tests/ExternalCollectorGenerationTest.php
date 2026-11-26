@@ -19,7 +19,7 @@ it('preserves source parameter boundaries when generating from an external colle
     };
 
     expect($source->generate($collector, 'image', ['id' => 42]))->toBe($expected)
-        ->and(CompiledRoutes::fromArray([])->generate($collector, 'image', ['id' => 42]))->toBe($expected);
+        ->and(CompiledRoutes::fromArray((new \Componenta\Http\Router\Cache\RouteCacheGenerator())->compile(new Routes()))->generate($collector, 'image', ['id' => 42]))->toBe($expected);
 })->with([
     'static suffix' => ['/images/{id}_thumb.jpg', '/images/42_thumb.jpg'],
     'literal colon' => ['/images/{id}/:preview', '/images/42/:preview'],

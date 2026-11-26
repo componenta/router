@@ -10,6 +10,7 @@ use Componenta\Http\Router\Contract\CompilerInterface;
 use Componenta\Http\Router\Contract\RouteCollectorInterface;
 use Componenta\Http\Router\HttpMethod;
 use Componenta\Http\Router\Internal\RouteRegex;
+use Componenta\Http\Router\Internal\RoutePrefix;
 use Componenta\Http\Router\Internal\SourceRouteIndex;
 use Componenta\Http\Router\Routes;
 use Componenta\Http\Router\Syntax\AngleBracketSyntax;
@@ -139,7 +140,7 @@ final class RouteCacheGenerator
                     $dynamicRoutes[$method][] = [
                         'route' => $route->name,
                         'compiled' => $compiled,
-                        'prefix' => $standardSyntax ? $this->getFirstSegment($route->path) : '*',
+                        'prefix' => RoutePrefix::forPattern($route->path, $standardSyntax),
                     ];
                 } else {
                     $staticRoutes[$method][$route->path] = $route->name;
@@ -211,27 +212,6 @@ final class RouteCacheGenerator
         }
 
         return true;
-    }
-
-    private function getFirstSegment(string $path): string
-    {
-        $segments = array_values(array_filter(
-            explode('/', $path),
-            static fn(string $s): bool => $s !== ''
-        ));
-
-        if ($segments === []) {
-            return '';
-        }
-
-        $first = $segments[0];
-
-        // If contains parameter markers, return wildcard
-        if (preg_match('/[\[\]{}<>:]/', $first)) {
-            return '*';
-        }
-
-        return $first;
     }
 
     /**
