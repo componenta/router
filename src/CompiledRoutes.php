@@ -403,7 +403,8 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     {
         $map = $chunk['routeMap'];
         if (count($map) === 1) {
-            return RouteRegex::match($chunk['regex'], $uri, $matches) ? reset($map) : null;
+            $name = reset($map);
+            return RouteRegex::match($chunk['regex'], $uri, $matches, in_array('MARK', $this->routeData[$name]['paramNames'] ?? [], true)) ? $name : null;
         }
         $matched = @preg_match($chunk['regex'], $uri, $matches, PREG_UNMATCHED_AS_NULL);
         if ($matched === 0) { return null; }

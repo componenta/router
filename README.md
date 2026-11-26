@@ -314,3 +314,5 @@ Both source and prepared matchers select candidates by complete literal segments
 Route registration normalizes boundary slashes to a single leading slash and removes trailing slashes (except the root). Interior slashes are preserved, including inside inline PCRE constraints. Matching does not collapse distinct request paths.
 
 Identical ordered dynamic-route sets across HTTP methods share a single prepared index. Static routes remain method-specific; runtime method order and the allowed-methods result are preserved.
+
+A route parameter named `MARK` is supported. If a custom PCRE control verb emits metadata under the same key during matching or generation, the router reports a `RoutePatternException` rather than returning the metadata as the captured value. Avoid that combination.

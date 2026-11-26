@@ -21,7 +21,7 @@ final readonly class SourceRouteIndex
 {
     /** @var array<string, array<string, RouteRecord>> */
     private array $staticRoutes;
-    /** @var array<string, list<array{route: RouteRecord, regex: string, compiled: RouteCompileResult}>> */
+    /** @var array<string, list<array{route: RouteRecord, regex: string, compiled: RouteCompileResult, protectMark: bool}>> */
     private array $dynamicRoutes;
     /** @var array<string, RouteCompileResult> */
     private array $patterns;
@@ -49,7 +49,7 @@ final readonly class SourceRouteIndex
             foreach ($route->methods as $method) {
                 if ($prefix !== null) {
                     $prefixIndex[$method][$prefix][] = count($dynamic[$method] ?? []);
-                    $dynamic[$method][] = ['route' => $route, 'regex' => $regex, 'compiled' => $compiled];
+                    $dynamic[$method][] = ['route' => $route, 'regex' => $regex, 'compiled' => $compiled, 'protectMark' => in_array('MARK', $compiled->parameterNames(), true)];
                     continue;
                 }
                 $previous = $static[$method][$route->path] ?? null;
@@ -82,7 +82,7 @@ final readonly class SourceRouteIndex
 
         foreach (RoutePrefix::candidates($this->prefixIndex[$method] ?? [], $uri) as $index) {
             $entry = $this->dynamicRoutes[$method][$index];
-            if (RouteRegex::match($entry['regex'], $uri, $matches)) {
+            if (RouteRegex::match($entry['regex'], $uri, $matches, $entry['protectMark'])) {
                 $pattern = $entry['compiled'];
                 return self::result($entry['route'], RouteParameters::extract($matches, $pattern->parameterNames(), $pattern->defaults));
             }

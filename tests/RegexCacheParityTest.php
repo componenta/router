@@ -83,3 +83,19 @@ it('accepts effective explicit overrides of contextual optional constraints', fu
             ->and($routes->generate($routes, 'item', ['value' => 'abc']))->toBe('/items/abc');
     }
 });
+
+
+it('never returns PCRE control metadata instead of a captured MARK parameter', function (): void {
+    $source = new Routes();
+    $source->addRoute(RouteRecord::get('plain', '/plain/{MARK}', 'Handler'));
+    $source->addRoute(RouteRecord::get('collision', '/collision/{MARK}', 'Handler', tokens: ['MARK' => '[a-z]+(*MARK:label)']));
+    $cached = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+    foreach ([$source, $cached] as $routes) {
+        expect($routes->match($routes, '/plain/abc', 'GET')->parameters)->toBe(['MARK' => 'abc'])
+            ->and($routes->generate($routes, 'plain', ['MARK' => 'abc']))->toBe('/plain/abc');
+        expect(fn () => $routes->match($routes, '/collision/abc', 'GET'))
+            ->toThrow(\Componenta\Http\Router\Exception\RoutePatternException::class, 'PCRE MARK metadata conflicts');
+        expect(fn () => $routes->generate($routes, 'collision', ['MARK' => 'abc']))
+            ->toThrow(\Componenta\Http\Router\Exception\RoutePatternException::class, 'PCRE MARK metadata conflicts');
+    }
+});

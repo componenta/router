@@ -52,7 +52,7 @@ final class PathParameter
         if ($path === '/') {
             $expression = RouteRegex::withOptionalRoot($expression);
         }
-        if (!RouteRegex::match(RouteRegex::anchored($expression), $path, $matches)) {
+        if (!RouteRegex::match(RouteRegex::anchored($expression), $path, $matches, array_key_exists('MARK', $expected))) {
             throw new InvalidArgumentException(sprintf('Generated path does not match route "%s".', $routeName));
         }
 
