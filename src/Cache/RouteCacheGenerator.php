@@ -33,7 +33,7 @@ use Componenta\VarExport\ScalarExporter;
  */
 final class RouteCacheGenerator
 {
-    public const int CACHE_VERSION = 11;
+    public const int CACHE_VERSION = 12;
 
     private const int CHUNK_SIZE = 24;
     private const int MAX_REGEX_SIZE = 900_000;

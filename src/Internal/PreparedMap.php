@@ -10,45 +10,75 @@ use UnitEnum;
 /** @internal Integrity of trusted deployment data, not an authentication signature. */
 final class PreparedMap
 {
-    private const int PERSISTABLE = 0;
-    private const int OPAQUE = 1;
-    private const int REFERENCED = 2;
+    private const int FLOATS = 1;
+    private const int OPAQUE = 2;
+    private const int REFERENCED = 4;
 
     public static function seal(array $map): array
     {
         unset($map['fingerprint']);
-        $map['fingerprint'] = self::inspect($map) === self::PERSISTABLE
-            ? hash('xxh128', serialize($map)) : null;
+        $map['fingerprint'] = self::fingerprint($map);
         return $map;
     }
 
     public static function valid(array $map): bool
     {
-        if (!array_key_exists('fingerprint', $map)) { return false; }
-        $fingerprint = $map['fingerprint'];
+        $fingerprint = $map['fingerprint'] ?? null;
+        if (!is_string($fingerprint)) { return false; }
         unset($map['fingerprint']);
+        $expected = self::fingerprint($map);
+        return $expected !== null && hash_equals($expected, $fingerprint);
+    }
+
+    private static function fingerprint(array $map): ?string
+    {
         $state = self::inspect($map);
-        if ($state === self::REFERENCED) { return false; }
-        if ($state === self::OPAQUE) { return $fingerprint === null; }
-        return is_string($fingerprint) && hash_equals($fingerprint, hash('xxh128', serialize($map)));
+        if (($state & self::REFERENCED) !== 0) { return null; }
+        if ($state === 0) { return hash('xxh128', serialize($map)); }
+
+        // Serialize only scalar, array and enum data. Float bytes are independent
+        // of serialize_precision; opaque runtime handlers retain their identity.
+        // Positions and types are stored separately to avoid placeholder collisions.
+        $special = [];
+        $normalized = self::normalize($map, [], $special);
+        return hash('xxh128', serialize([$normalized, $special]));
     }
 
     private static function inspect(array $map): int
     {
-        $state = self::PERSISTABLE;
+        $state = 0;
         foreach ($map as $key => $value) {
-            // Detect cycles as well as external mutation through reference slots.
             if (ReflectionReference::fromArrayElement($map, $key) !== null) { return self::REFERENCED; }
             if (is_array($value)) {
                 $nested = self::inspect($value);
-                if ($nested === self::REFERENCED) { return $nested; }
-                $state = max($state, $nested);
+                if (($nested & self::REFERENCED) !== 0) { return $nested; }
+                $state |= $nested;
+            } elseif (is_float($value)) {
+                $state |= self::FLOATS;
             } elseif (!is_scalar($value) && $value !== null && !$value instanceof UnitEnum) {
-                // Never invoke serialization hooks on runtime handler objects.
-                $state = self::OPAQUE;
+                $state |= self::OPAQUE;
             }
         }
         return $state;
+    }
+
+    private static function normalize(array $map, array $path, array &$special): array
+    {
+        foreach ($map as $key => $value) {
+            if (is_array($value)) {
+                $map[$key] = self::normalize($value, [...$path, $key], $special);
+            } elseif (is_float($value)) {
+                $special[] = [[...$path, $key], 'float', is_nan($value) ? 'nan' : pack('E', $value)];
+                $map[$key] = null;
+            } elseif (is_object($value) && !$value instanceof UnitEnum) {
+                $special[] = [[...$path, $key], 'object', $value::class, spl_object_id($value)];
+                $map[$key] = null;
+            } elseif (is_resource($value) || gettype($value) === 'resource (closed)') {
+                $special[] = [[...$path, $key], 'resource', gettype($value), (int) $value];
+                $map[$key] = null;
+            }
+        }
+        return $map;
     }
 
     private function __construct() {}
