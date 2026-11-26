@@ -14,6 +14,16 @@ final class RouteRegex
         return '#\A(?:' . $expression . ')\z#' . $modifiers;
     }
 
+    /** @param list<string> $expressions */
+    public static function combined(array $expressions): string
+    {
+        $branches = [];
+        foreach ($expressions as $index => $expression) {
+            $branches[] = '(?:' . $expression . ')(*MARK:r' . $index . ')';
+        }
+        return self::anchored(implode('|', $branches), 'J');
+    }
+
     public static function match(string $regex, string $subject, ?array &$matches = null): bool
     {
         // Do not confuse an invalid expression or an exhausted PCRE limit with a miss.

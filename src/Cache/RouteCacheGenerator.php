@@ -34,7 +34,7 @@ use Componenta\VarExport\ScalarExporter;
  */
 final class RouteCacheGenerator
 {
-    public const int CACHE_VERSION = 13;
+    public const int CACHE_VERSION = 14;
 
     private const int CHUNK_SIZE = 24;
     private const int MAX_REGEX_SIZE = 900_000;
@@ -199,8 +199,9 @@ final class RouteCacheGenerator
     private function canCombineTokens(array $tokens): bool
     {
         foreach ($tokens as $pattern) {
-            // Group numbering, subroutines, inline options and control verbs have expression-local scope.
-            if (!is_string($pattern) || str_contains($pattern, '(') || preg_match('~\\\\[1-9gk]~', $pattern) === 1) {
+            // Only known built-in constraints qualify. Custom expressions can
+            // have different resource-limit behavior when combined.
+            if ($pattern !== '[^/]+' && !in_array($pattern, CompilerInterface::DEFAULT_PATTERNS, true)) {
                 return false;
             }
         }
@@ -258,7 +259,15 @@ final class RouteCacheGenerator
                 }
 
                 $chunkIndex = count($dynamicChunks[$method]);
-                $dynamicChunks[$method][$chunkIndex] = compact('regex') + ['routeMap' => $chunkRouteMap];
+                $chunk = ['routeMap' => $chunkRouteMap];
+                if (count($chunkRoutes) > 1) {
+                    // Store each expression once; reconstruct the combined
+                    // expression when loading the prepared map.
+                    $chunk['individual'] = array_map(static fn (array $entry): string => $entry['compiled']->regex, $chunkRoutes);
+                } else {
+                    $chunk['regex'] = $regex;
+                }
+                $dynamicChunks[$method][$chunkIndex] = $chunk;
 
                 foreach ($chunkRoutes as $routeInfo) {
                     $prefixIndex[$method][$routeInfo['prefix']][] = $chunkIndex;
@@ -294,11 +303,11 @@ final class RouteCacheGenerator
 
         foreach ($routes as $index => $routeInfo) {
             $mark = 'r' . $index;
-            $patterns[] = '(?:' . $routeInfo['compiled']->regex . ')(*MARK:' . $mark . ')';
+            $patterns[] = $routeInfo['compiled']->regex;
             $routeMap[$mark] = $routeInfo['route'];
         }
 
-        return [RouteRegex::anchored(implode('|', $patterns), 'J'), $routeMap];
+        return [RouteRegex::combined($patterns), $routeMap];
     }
 
     /**

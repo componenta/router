@@ -68,7 +68,7 @@ final readonly class HttpMethod implements \Stringable
     public static function normalize(string $method): string
     {
         // HTTP methods are case-sensitive tokens (RFC 9110, section 9.1).
-        if (preg_match('/\A[!#$%&\'\*+\-.^_`|~0-9A-Za-z]+\z/', $method) !== 1) {
+        if ($method === '' || strspn($method, "!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz") !== strlen($method)) {
             throw new \InvalidArgumentException('Invalid HTTP method token.');
         }
         return $method;

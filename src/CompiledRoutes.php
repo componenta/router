@@ -41,7 +41,8 @@ use Generator;
 final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface, GeneratorInterface
 {
     private readonly SyntaxParserInterface $sourceSyntax;
-    private ?Routes $sourceRoutes = null;
+    /** @var array<string, string> */
+    private readonly array $routeKeys;
     public readonly CompilerInterface $compiler;
 
     /** @var array<string, RouteRecord> */
@@ -57,7 +58,9 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         ?SyntaxParserInterface $generationSyntax = null,
         ?SyntaxParserInterface $compilerSyntax = null,
         private readonly bool $explicitGenerationSyntax = true,
+        array $routeKeys = [],
     ) {
+        $this->routeKeys = $routeKeys;
         $this->sourceSyntax = $generationSyntax ?? new CompositeSyntax();
         $this->compiler = new Compiler($compilerSyntax, $defaultTokens);
     }
@@ -83,7 +86,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         return self::tryFromArray($data) ?? throw new \InvalidArgumentException('Invalid or incompatible route cache; rebuild from the original source.');
     }
 
-    private static function hydrate(array $data): self
+    private static function hydrate(array $data, array $routeKeys): self
     {
         return new self(
             $data['staticRoutes'] ?? [],
@@ -94,6 +97,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             self::syntaxFromCache(array_key_exists('generationSyntax', $data) ? $data['generationSyntax'] : CompositeSyntax::class),
             self::syntaxFromCache(array_key_exists('compilerSyntax', $data) ? $data['compilerSyntax'] : CompositeSyntax::class),
             $data['explicitGenerationSyntax'] ?? false,
+            $routeKeys,
         );
     }
 
@@ -238,13 +242,21 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
 
         $seenDynamic = [];
         $expectedPrefixes = [];
+        $hydratedChunks = [];
         foreach ($data['dynamicChunks'] ?? [] as $method => $chunks) {
             if (!is_array($chunks) || !array_is_list($chunks) || $chunks === []) { return null; }
             foreach ($chunks as $index => $chunk) {
-                if (!is_array($chunk) || !is_string($chunk['regex'] ?? null) || preg_match($chunk['regex'], '') === false
-                    || !is_array($chunk['routeMap'] ?? null) || $chunk['routeMap'] === []) { return null; }
+                if (!is_array($chunk) || !is_array($chunk['routeMap'] ?? null) || $chunk['routeMap'] === []) { return null; }
                 $map = $chunk['routeMap'];
-                if (count($map) > 24) { return null; }
+                if (count($map) > 24 || array_diff(array_keys($chunk), ['regex','routeMap','individual']) !== []) { return null; }
+                if (count($map) > 1) {
+                    $individual = $chunk['individual'] ?? null;
+                    if (array_key_exists('regex', $chunk) || !is_array($individual) || !array_is_list($individual) || count($individual) !== count($map)) { return null; }
+                    if (!array_all($individual, static fn (mixed $expression): bool => is_string($expression))) { return null; }
+                    $chunk['regex'] = RouteRegex::combined($individual);
+                } elseif (array_key_exists('individual', $chunk) || !is_string($chunk['regex'] ?? null)) { return null; }
+                if (preg_match($chunk['regex'], '') === false) { return null; }
+                $hydratedChunks[$method][$index] = $chunk;
                 if (array_keys($map) !== array_map(static fn (int $i): string => 'r' . $i, range(0, count($map) - 1))) { return null; }
                 foreach ($map as $name) {
                     if (!is_string($name) || !isset($records[$name])) { return null; }
@@ -265,12 +277,12 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         $chunks = $prefixes = [];
         foreach ($expectedDynamic as $method => $_) {
             $owner = $aliases[$method] ?? $method;
-            $chunks[$method] = $data['dynamicChunks'][$owner];
+            $chunks[$method] = $hydratedChunks[$owner];
             $prefixes[$method] = $data['prefixIndex'][$owner];
         }
         $data['dynamicChunks'] = $chunks;
         $data['prefixIndex'] = $prefixes;
-        return self::hydrate($data);
+        return self::hydrate($data, $pathKeys);
     }
 
     private static function isTokenShape(array $tokens, bool $nullable = false): bool
@@ -359,61 +371,58 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
      */
     private function matchChunks(string $uri, string $method, array &$allowed): ?MatchResult
     {
-        if (isset($this->dynamicChunks[$method])) {
-            $chunksToSearch = RoutePrefix::candidates($this->prefixIndex[$method], $uri);
-
-            foreach ($chunksToSearch as $chunkIndex) {
-                if (!isset($this->dynamicChunks[$method][$chunkIndex])) {
-                    continue;
-                }
-
-                $chunk = $this->dynamicChunks[$method][$chunkIndex];
-
-                $map = $chunk['routeMap'];
-                $matched = @preg_match($chunk['regex'], $uri, $m, PREG_UNMATCHED_AS_NULL);
-                if ($matched === false) {
-                    if (count($map) > 1) {
-                        return $this->matchSourcePatterns($uri, $method);
-                    }
-                    throw new RoutePatternException('Route expression failed: ' . preg_last_error_msg());
-                }
-                if ($matched === 1) {
-                    $name = count($map) === 1 ? reset($map) : ($map[$m['MARK'] ?? ''] ?? null);
-                    if (!is_string($name)) { return $this->matchSourcePatterns($uri, $method); }
-                    return $this->matchResult($name, $this->extractParams($m, $this->routeData[$name]));
-                }
+        foreach (RoutePrefix::candidates($this->prefixIndex[$method] ?? [], $uri) as $index) {
+            $name = $this->matchChunk($this->dynamicChunks[$method][$index], $uri, $matches);
+            if ($name !== null) {
+                return $this->matchResult($name, $this->extractParams($matches, $this->routeData[$name]));
             }
         }
-
-        foreach ($this->dynamicChunks as $m => $methodChunks) {
-            if ((string) $m === $method) {
-                continue;
-            }
-            foreach (RoutePrefix::candidates($this->prefixIndex[$m], $uri) as $index) {
-                $chunk = $methodChunks[$index];
-                $matched = @preg_match($chunk['regex'], $uri);
-                if ($matched === false) {
-                    if (count($chunk['routeMap']) > 1) {
-                        return $this->matchSourcePatterns($uri, $method);
-                    }
-                    throw new RoutePatternException('Route expression failed: ' . preg_last_error_msg());
-                }
-                if ($matched === 1) {
-                    $allowed[] = (string) $m;
+        foreach ($this->dynamicChunks as $other => $chunks) {
+            if ((string) $other === $method) { continue; }
+            foreach (RoutePrefix::candidates($this->prefixIndex[$other], $uri) as $index) {
+                if ($this->testChunk($chunks[$index], $uri)) {
+                    $allowed[] = (string) $other;
                     break;
                 }
             }
         }
-
         return null;
     }
 
-    private function matchSourcePatterns(string $uri, string $method): MatchResult
+    private function testChunk(array $chunk, string $uri): bool
     {
-        // Combined expressions can exhaust PCRE limits before individual routes do.
-        $source = $this->sourceRoutes ??= Routes::fromResolved($this, $this->compiler, $this->explicitGenerationSyntax ? $this->sourceSyntax : null);
+        $matched = @preg_match($chunk['regex'], $uri);
+        if ($matched !== false) { return $matched === 1; }
+        if (count($chunk['routeMap']) === 1) {
+            throw new RoutePatternException('Route expression failed: ' . preg_last_error_msg());
+        }
+        return $this->matchIndividuals($chunk, $uri, $matches) !== null;
+    }
 
-        return $source->match($source, $uri, $method);
+    private function matchChunk(array $chunk, string $uri, ?array &$matches): ?string
+    {
+        $map = $chunk['routeMap'];
+        if (count($map) === 1) {
+            return RouteRegex::match($chunk['regex'], $uri, $matches) ? reset($map) : null;
+        }
+        $matched = @preg_match($chunk['regex'], $uri, $matches, PREG_UNMATCHED_AS_NULL);
+        if ($matched === 0) { return null; }
+        if ($matched === 1 && isset($map[$matches['MARK'] ?? ''])) {
+            return $map[$matches['MARK']];
+        }
+        return $this->matchIndividuals($chunk, $uri, $matches);
+    }
+
+    private function matchIndividuals(array $chunk, string $uri, ?array &$matches): ?string
+    {
+        // Retry only the original eligible expressions, not a newly compiled collection.
+        foreach (array_values($chunk['routeMap']) as $offset => $name) {
+            if (RoutePrefix::accepts($this->routeKeys[$name], $uri)
+                && RouteRegex::match(RouteRegex::anchored($chunk['individual'][$offset]), $uri, $matches)) {
+                return $name;
+            }
+        }
+        return null;
     }
 
     /**

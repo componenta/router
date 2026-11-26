@@ -34,6 +34,16 @@ final class RoutePrefix
         return self::suffixKey($prefix, $segment);
     }
 
+    public static function accepts(string $key, string $uri): bool
+    {
+        if ($key[0] === '!') {
+            $separator = strpos($key, ':');
+            if (substr($key, 1, $separator - 1) !== substr($uri, strrpos($uri, '/') + 1)) { return false; }
+            $key = substr($key, $separator + 1);
+        }
+        return $key === '*' || $uri === $key || str_starts_with($uri, $key . '/');
+    }
+
     private static function suffixKey(string $prefix, string $segment): string
     {
         // A normal prefix starts with '/' or equals '*'; a suffix key cannot collide.
