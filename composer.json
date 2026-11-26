@@ -8,8 +8,8 @@
         "componenta/arrayable": "^1.0",
         "componenta/config": "^3.0 || ^4.0",
         "componenta/di": "^5.0.3 || ^6.0",
-        "componenta/http-responder": "^1.0.3",
-        "componenta/middleware-factory": "^2.1.0",
+        "componenta/http-responder": "^1.0.3 || ^2.0",
+        "componenta/middleware-factory": "^2.1.0 || ^3.0",
         "componenta/path-resolver": "^1.0",
         "componenta/var-export": "^2.0.0",
         "psr/container": "^2.0",
@@ -36,7 +36,8 @@
         },
         "branch-alias": {
             "dev-main": "3.0.x-dev",
-            "dev-fix/callback-dependency-baseline-2026-11-26": "3.0.x-dev"
+            "dev-fix/callback-dependency-baseline-2026-11-26": "3.0.x-dev",
+            "dev-fix/http-cache-dependency-integration-2026-11-26": "3.1.x-dev"
         }
     },
     "require-dev": {
