@@ -73,6 +73,13 @@ final class RouteRegex
         }
     }
 
+    /** Validate a standalone token without letting its enclosing group repair it. */
+    public static function validateFragment(string $pattern): void
+    {
+        self::validate('#' . $pattern . '#');
+        self::validate(self::anchored($pattern));
+    }
+
     /** Validate a complete expression and recognize the omitted optional root. */
     public static function withOptionalRoot(string $expression): string
     {

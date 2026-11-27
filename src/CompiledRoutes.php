@@ -273,7 +273,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         foreach ($tokens as $pattern) {
             if ($pattern !== null && !isset($validated[$pattern])) {
                 try {
-                    RouteRegex::validate(RouteRegex::anchored($pattern));
+                    RouteRegex::validateFragment($pattern);
                 } catch (RoutePatternException) {
                     return false;
                 }

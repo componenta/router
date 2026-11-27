@@ -125,3 +125,47 @@ it('compiles with default CompositeSyntax for all syntax styles', function (stri
     'angle' => ['/users/<id>'],
     'square' => ['/users/[id]'],
 ]);
+
+
+it('rejects standalone tokens that escape their own PCRE group', function (string $token): void {
+    expect(fn () => \Componenta\Http\Router\RouteRecord::get('item', '/items/{value}', 'H', tokens: ['value' => $token]))
+        ->toThrow(InvalidArgumentException::class);
+    expect(fn () => new Compiler(defaultPatterns: ['value' => $token]))
+        ->toThrow(InvalidArgumentException::class);
+    expect(fn () => (new Compiler())->compile('/items/{value}', tokens: ['value' => $token]))
+        ->toThrow(InvalidArgumentException::class);
+})->with([
+    'a)|(?:/b',
+    'a)(?:b',
+    'a)|(?P<escape>b',
+    '(?:a))|(?:b',
+    'a)|b(?:',
+    'a)|(?:',
+    'a(?x:)|(?:b',
+]);
+
+it('preserves balanced PCRE fragments in prepared route definitions', function (string $token): void {
+    $routes = new \Componenta\Http\Router\Routes();
+    $routes->addRoute(\Componenta\Http\Router\RouteRecord::get('item', '/items/{value}', 'H', tokens: ['value' => $token]));
+    $map = (new \Componenta\Http\Router\Cache\RouteCacheGenerator())->compile($routes);
+    expect(\Componenta\Http\Router\CompiledRoutes::tryFromArray($map))->not->toBeNull();
+})->with([
+    'a|b',
+    '(?:a|b)',
+    'a\(b\)',
+    '[(]a[)]',
+    '(a)(b)\2',
+    '[a-z]+(*MARK:label)',
+    '(?i:abc)',
+    '\Q(a)|b\E',
+]);
+
+it('rejects a resealed map containing a fragment repaired by its enclosing group', function (): void {
+    $routes = new \Componenta\Http\Router\Routes();
+    $routes->addRoute(\Componenta\Http\Router\RouteRecord::get('item', '/items/{value}', 'H', tokens: ['value' => 'a|b']));
+    $map = (new \Componenta\Http\Router\Cache\RouteCacheGenerator())->compile($routes);
+    $map['routeData']['item']['record']['tokens']['value'] = 'a)|(?:/b';
+    $map['routeData']['item']['tokens']['value'] = 'a)|(?:/b';
+    $map['routeData']['item']['regex'] = '#\A(?:/items/(?P<value>a)|(?:/b))\z#';
+    expect(\Componenta\Http\Router\CompiledRoutes::tryFromArray(\Componenta\Http\Router\Internal\PreparedMap::seal($map)))->toBeNull();
+});

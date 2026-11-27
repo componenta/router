@@ -42,7 +42,7 @@ final readonly class Compiler implements CompilerInterface
         $mergedTokens = $this->defaultTokens;
 
         if (!empty($parsed['tokens'])) $mergedTokens = array_merge($mergedTokens, $parsed['tokens']);
-        if ($tokens !== []) $mergedTokens = array_merge($mergedTokens, $tokens);
+        if ($tokens !== []) $mergedTokens = array_merge($mergedTokens, RouteDefinition::tokens($tokens));
 
         $defaults = array_merge($parsed['defaults'], $defaults);
 

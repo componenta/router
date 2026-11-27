@@ -46,7 +46,7 @@ final class RouteDefinition
             if (!is_string($pattern)) { throw new InvalidArgumentException("Token pattern for '$name' must be a string"); }
             if ($checked === null || !isset($checked[$pattern])) {
                 try {
-                    RouteRegex::validate(RouteRegex::anchored($pattern));
+                    RouteRegex::validateFragment($pattern);
                 } catch (RoutePatternException $error) {
                     throw new InvalidArgumentException("Invalid regex pattern for token '$name': $pattern", previous: $error);
                 }
