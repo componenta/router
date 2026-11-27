@@ -71,9 +71,17 @@ it('prepares the selected compiler syntax without reparsing literal text using a
     $compiler = new Compiler(new SquareBracketSyntax());
     $source = new Routes($compiler);
     $source->addRoute(RouteRecord::get('literal', '/literal/{unfinished', 'Handler'));
+    $source->addRoute(RouteRecord::get('encoded', '/literal/%7Bunfinished', 'Handler'));
     $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator($compiler))->compile($source));
-    expect($prepared->generate($prepared, 'literal'))->toBe('/literal/{unfinished')
-        ->and(routeLifecycleObservation($prepared, '/literal/{unfinished', 'GET'))
+    foreach ([$source, $prepared] as $routes) {
+        // Raw matching still honors the selected syntax. Only generation of
+        // invalid HTTP paths is rejected; the encoded literal is round-trip safe.
+        expect($routes->match($routes, '/literal/{unfinished', 'GET')->name)->toBe('literal')
+            ->and(fn () => $routes->generate($routes, 'literal'))->toThrow(InvalidArgumentException::class)
+            ->and($routes->generate($routes, 'encoded'))->toBe('/literal/%7Bunfinished')
+            ->and($routes->match($routes, '/literal/%7Bunfinished', 'GET')->name)->toBe('encoded');
+    }
+    expect(routeLifecycleObservation($prepared, '/literal/{unfinished', 'GET'))
         ->toBe(routeLifecycleObservation($source, '/literal/{unfinished', 'GET'));
 });
 

@@ -101,3 +101,64 @@ it('preserves valid literal dots, encoded spaces and double-encoded parameter pe
         }
     }
 });
+
+
+it('rejects unencoded path literals and malformed percent escapes without changing raw matching', function (string $path, array $params, string $raw): void {
+    $source = (new Routes())->addRoute(RouteRecord::get('item', $path, 'H'));
+    $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+    foreach ([$source, $prepared] as $routes) {
+        expect(fn () => $routes->generate($routes, 'item', $params))->toThrow(InvalidArgumentException::class)
+            ->and($routes->match($routes, $raw, 'GET')->name)->toBe('item');
+    }
+})->with([
+    ['/café', [], '/café'],
+    ['/a/[123]', [], '/a/[123]'],
+    ['/a/100%', [], '/a/100%'],
+    ['/a/%2', [], '/a/%2'],
+    ['/a/%GG', [], '/a/%GG'],
+    ['/a/%2z', [], '/a/%2z'],
+    ['/a/"quoted"', [], '/a/"quoted"'],
+    ['/a/pipe|value', [], '/a/pipe|value'],
+    ['/café/{id}', ['id' => 42], '/café/42'],
+    ['/café/[id]', ['id' => 42], '/café/42'],
+    ['/café/<id>', ['id' => 42], '/café/42'],
+    ['/café/:id', ['id' => 42], '/café/42'],
+]);
+
+it('round trips generated paths through a real PSR-7 request and matching middleware', function (string $pattern, array $parameters, string $expected): void {
+    $source = (new Routes())->addRoute(RouteRecord::get('item', $pattern, 'H'));
+    $generator = new RouteCacheGenerator();
+    $file = tempnam(sys_get_temp_dir(), 'router-uri-');
+    if ($file === false) { throw new RuntimeException('Cannot create route cache fixture.'); }
+    try {
+        $generator->generate($source, $file);
+        foreach ([$source, CompiledRoutes::fromArray($generator->compile($source)), CompiledRoutes::fromCache($file)] as $routes) {
+            $router = \Componenta\Http\Router\Router::fromDnf($routes);
+            $url = $router->generate('item', $parameters);
+            $request = new \Nyholm\Psr7\ServerRequest('GET', 'https://example.test' . $url);
+            $middleware = new \Componenta\Http\Router\Middleware\MatchRouteMiddleware($router);
+            $handler = new class implements \Psr\Http\Server\RequestHandlerInterface {
+                public function handle(\Psr\Http\Message\ServerRequestInterface $request): \Psr\Http\Message\ResponseInterface
+                {
+                    $result = \Componenta\Http\Router\Middleware\MatchRouteMiddleware::getMatchResultFromRequest($request);
+                    return new \Nyholm\Psr7\Response(200, [], $result?->name ?? 'missing');
+                }
+            };
+            expect($url)->toBe($expected)
+                ->and($request->getUri()->getPath())->toBe($expected)
+                ->and((string) $middleware->process($request, $handler)->getBody())->toBe('item');
+        }
+    } finally {
+        unlink($file);
+    }
+})->with([
+    ['/caf%C3%A9', [], '/caf%C3%A9'],
+    ['/a/%5B123%5D', [], '/a/%5B123%5D'],
+    ['/a/100%25', [], '/a/100%25'],
+    ['/a/%2f/%41/%7e', [], '/a/%2f/%41/%7e'],
+    ['/caf%C3%A9/{value}', ['value' => 'a b'], '/caf%C3%A9/a%20b'],
+    ['/caf%C3%A9/[value]', ['value' => 'a b'], '/caf%C3%A9/a%20b'],
+    ['/caf%C3%A9/<value>', ['value' => 'a b'], '/caf%C3%A9/a%20b'],
+    ['/caf%C3%A9/:value', ['value' => 'a b'], '/caf%C3%A9/a%20b'],
+    ["/a/!$&'()*+,;=:@/~-._", [], "/a/!$&'()*+,;=:@/~-._"],
+]);

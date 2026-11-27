@@ -12,6 +12,10 @@ final class PathParameter
 {
     private const string CONTROL_BYTES = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f";
 
+    // RFC 3986 pchar, slash separators and the percent-escape introducer.
+    private const string PATH_BYTES = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~!$&\'()*+,;=:@/%';
+    private const string HEX_BYTES = '0123456789abcdefABCDEF';
+
     public static function encode(mixed $parameter, string $name): string
     {
         if (!is_scalar($parameter) && !$parameter instanceof Stringable) {
@@ -41,8 +45,16 @@ final class PathParameter
         if (str_starts_with($path, '//') || str_contains($path, '?') || str_contains($path, '#')) {
             throw new InvalidArgumentException('Generated route must be a path without authority, query or fragment.');
         }
-        if (strcspn($path, self::CONTROL_BYTES . " \\") !== strlen($path)) {
-            throw new InvalidArgumentException('Generated route contains an unsafe literal path character.');
+        // The matcher consumes the wire-encoded PSR-7 path. Returning a
+        // literal which a URI implementation would encode breaks round trips.
+        // Do not rewrite the configured template or double-encode escapes.
+        if (strspn($path, self::PATH_BYTES) !== strlen($path)) {
+            throw new InvalidArgumentException('Generated route contains a literal character which must be percent-encoded.');
+        }
+        for ($offset = 0; ($offset = strpos($path, '%', $offset)) !== false; $offset += 3) {
+            if (strspn($path, self::HEX_BYTES, $offset + 1, 2) !== 2) {
+                throw new InvalidArgumentException('Generated route contains an invalid percent escape.');
+            }
         }
         // A client may normalize literal and percent-encoded dot segments.
         // Validate the assembled path, not just individually encoded parameters.
