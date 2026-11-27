@@ -6,6 +6,7 @@ namespace Componenta\Http\Router\Cache;
 
 use RuntimeException;
 use Componenta\Http\Router\Compiler;
+use Componenta\Http\Router\CompiledRoutes;
 use Componenta\Http\Router\Contract\CompilerInterface;
 use Componenta\Http\Router\Contract\RouteCollectorInterface;
 use Componenta\Http\Router\Exception\UnsupportedRouteCacheException;
@@ -65,13 +66,12 @@ final class RouteCacheGenerator
             throw new UnsupportedRouteCacheException('Route compiler cannot be preserved in a cache; use the original route source.');
         }
 
-        if ($routes instanceof Routes && $routes->compiler != $this->compiler) {
+        if (($routes instanceof Routes || $routes instanceof CompiledRoutes) && $routes->compiler != $this->compiler) {
             throw new UnsupportedRouteCacheException('Route cache must use the source collection compiler.');
         }
 
-        $syntax = $routes instanceof Routes && $routes->syntax !== null
-            ? $routes->syntax
-            : $this->compiler->syntax;
+        $explicitSyntax = ($routes instanceof Routes || $routes instanceof CompiledRoutes) ? $routes->syntax : null;
+        $syntax = $explicitSyntax ?? $this->compiler->syntax;
         foreach (['generation' => $syntax, 'compiler' => $this->compiler->syntax] as $role => $parser) {
             if (!in_array($parser::class, [
                 CompositeSyntax::class, CurlySyntax::class, SquareBracketSyntax::class,
@@ -129,7 +129,7 @@ final class RouteCacheGenerator
             $defaultTokens,
             $syntax::class,
             $this->compiler->syntax::class,
-            $routes instanceof Routes && $routes->syntax !== null,
+            $explicitSyntax !== null,
         );
     }
 

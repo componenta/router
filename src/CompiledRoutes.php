@@ -43,6 +43,8 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
 {
     private readonly SyntaxParserInterface $sourceSyntax;
     public readonly CompilerInterface $compiler;
+    /** Explicit URL generation syntax, or null to use the compiler syntax. */
+    public readonly ?SyntaxParserInterface $syntax;
 
     /** @var array<string, RouteRecord> */
     private array $records = [];
@@ -54,10 +56,11 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         private readonly array $routeData,
         ?SyntaxParserInterface $generationSyntax = null,
         ?SyntaxParserInterface $compilerSyntax = null,
-        private readonly bool $explicitGenerationSyntax = true,
+        bool $explicitGenerationSyntax = true,
     ) {
-        $this->sourceSyntax = $generationSyntax ?? new CompositeSyntax();
         $this->compiler = new Compiler($compilerSyntax, $defaultTokens);
+        $this->syntax = $explicitGenerationSyntax ? ($generationSyntax ?? new CompositeSyntax()) : null;
+        $this->sourceSyntax = $this->syntax ?? $this->compiler->syntax;
     }
 
     private function matchResult(string $name, array $parameters): MatchResult
@@ -353,8 +356,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             $route->defaults
         );
 
-        $syntax = $this->explicitGenerationSyntax ? $this->sourceSyntax
-            : ($this->compiler instanceof Compiler ? $this->compiler->syntax : new CompositeSyntax());
+        $syntax = $this->sourceSyntax;
 
         return $syntax->buildPath(
             $route->path,
