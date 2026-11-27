@@ -46,7 +46,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     /** Explicit URL generation syntax, or null to use the compiler syntax. */
     public readonly ?SyntaxParserInterface $syntax;
 
-    /** @var array<string, RouteRecord> */
+    /** @var array<array-key, RouteRecord> */
     private array $records = [];
 
     /** @param array<string, string> $defaultTokens */
@@ -414,7 +414,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     /**
      * Iterate over all routes.
      *
-     * @return Generator<string, RouteRecord>
+     * @return Generator<array-key, RouteRecord>
      */
     public function getIterator(): Generator
     {
@@ -434,7 +434,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
     /**
      * Convert to array of route records.
      *
-     * @return array<string, RouteRecord>
+     * @return array<array-key, RouteRecord>
      */
     public function toArray(): array
     {

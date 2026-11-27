@@ -78,3 +78,37 @@ it('uses custom compiler defaults for generation while preserving explicit publi
         @unlink($file);
     }
 });
+
+it('preserves numeric route names and native collection keys across source and file cache', function (): void {
+    $source = new Routes();
+    $source->addRoute(RouteRecord::get('42', '/answer', 'AnswerHandler'));
+    $source->addRoute(RouteRecord::get('042', '/answer/{id}', 'ItemHandler'));
+    $source->addRoute(RouteRecord::get('0', '/zero/{id}', 'ZeroHandler'));
+    $source->addRoute(RouteRecord::get('-7', '/negative', 'NegativeHandler'));
+
+    $generator = new RouteCacheGenerator();
+    $file = tempnam(sys_get_temp_dir(), 'router_numeric_names_');
+    if ($file === false) { throw new RuntimeException('Cannot create route cache fixture.'); }
+    try {
+        $generator->generate($source, $file);
+        $expectedKeys = [42, '042', 0, -7];
+        foreach ([$source, CompiledRoutes::fromArray($generator->compile($source)), CompiledRoutes::fromCache($file)] as $routes) {
+            expect(array_keys($routes->toArray()))->toBe($expectedKeys)
+                ->and(array_keys(iterator_to_array($routes)))->toBe($expectedKeys)
+                ->and(count($routes))->toBe(4);
+            foreach ([
+                ['42', '/answer', []],
+                ['042', '/answer/9', ['id' => 9]],
+                ['0', '/zero/1', ['id' => 1]],
+                ['-7', '/negative', []],
+            ] as [$name, $path, $parameters]) {
+                expect($routes->has($name))->toBeTrue()
+                    ->and($routes->getRoute($name)->name)->toBe($name)
+                    ->and($routes->match($routes, $path, 'GET')->name)->toBe($name)
+                    ->and($routes->generate($routes, $name, $parameters))->toBe($path);
+            }
+        }
+    } finally {
+        unlink($file);
+    }
+});

@@ -17,9 +17,9 @@ use Componenta\Http\Router\Syntax\CompositeSyntax;
 final readonly class SourceRouteIndex
 {
     private RouteMatchIndex $index;
-    /** @var array<string, RouteRecord> */
+    /** @var array<array-key, RouteRecord> */
     private array $records;
-    /** @var array<string, RouteCompileResult> */
+    /** @var array<array-key, RouteCompileResult> */
     private array $patterns;
 
     /** @param iterable<RouteRecord> $records */

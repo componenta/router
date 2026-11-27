@@ -14,7 +14,9 @@ use Componenta\Http\Router\Exception\RouteNotRegisteredException;
  * Provides methods to query, iterate, and retrieve routes by name.
  * Implementations may be mutable (Routes) or immutable (CompiledRoutes).
  *
- * @extends \IteratorAggregate<string, RouteRecord>
+ * Numeric string route names that PHP converts to integer array keys retain
+ * their original string in RouteRecord::name and in name-based lookups.
+ * @extends \IteratorAggregate<array-key, RouteRecord>
  */
 interface RouteCollectorInterface extends Arrayable, \Countable, \IteratorAggregate
 {
@@ -38,7 +40,7 @@ interface RouteCollectorInterface extends Arrayable, \Countable, \IteratorAggreg
     /**
      * Get all routes as an associative array.
      *
-     * @return array<string, RouteRecord> Routes indexed by name
+     * @return array<array-key, RouteRecord> Routes indexed by name using PHP array-key semantics
      */
     public function toArray(): array;
 }

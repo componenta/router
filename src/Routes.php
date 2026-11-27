@@ -21,7 +21,7 @@ use Generator;
  */
 final class Routes implements RouteCollectorInterface, MatcherInterface, GeneratorInterface
 {
-    /** @var array<string, RouteRecord> */
+    /** @var array<array-key, RouteRecord> */
     private array $routes = [];
 
     private(set) GroupCollector $groups;
