@@ -83,8 +83,8 @@ final readonly class RouteLocatorFactory
                 $resolved = $target;
             }
         }
-        $normalized = str_replace('\\', '/', $resolved);
-        return DIRECTORY_SEPARATOR === '\\' ? strtolower($normalized) : $normalized;
+        // A backslash is a legal filename byte on POSIX, not a separator.
+        return DIRECTORY_SEPARATOR === '\\' ? strtolower(str_replace('\\', '/', $resolved)) : $resolved;
     }
 
     public static function cacheFileFor(string $routesFile): string

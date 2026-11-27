@@ -114,3 +114,61 @@ it('protects a reserved artifact behind a directory alias before its descendants
         rmdir($root);
     }
 });
+
+
+it('preserves literal backslashes in resolved POSIX artifact paths without weakening alias protection', function (): void {
+    if (DIRECTORY_SEPARATOR !== '/') {
+        test()->markTestSkipped('POSIX filename semantics required.');
+    }
+    $root = sys_get_temp_dir() . '/route_posix_' . bin2hex(random_bytes(8));
+    mkdir($root);
+    mkdir($root . '/a');
+    mkdir($root . '/a/b');
+    mkdir($root . '/a\b');
+    $alias = $root . '/alias';
+    $sourceFile = $root . '/a\b/routes.php';
+    $otherFile = $root . '/a/b/routes.php';
+    try {
+        if (!@symlink($root . '/a\b', $alias)) {
+            test()->markTestSkipped('Symbolic links unavailable.');
+        }
+        file_put_contents($sourceFile, 'source');
+        file_put_contents($otherFile, 'different file');
+
+        $container = static function (string $source, string $cache) use ($root): \Componenta\Config\ContainerValue {
+            $composition = (new ConfigFactory())->create(new Environment([]),
+                static fn (): array => [
+                    ConfigKey::ROUTES_FILE => $source,
+                    ConfigKey::ROUTES_CACHE_FILE => $cache,
+                    DIConfigKey::DEPENDENCIES => [DIConfigKey::SERVICES => [
+                        PathResolverInterface::class => new PathResolver($root),
+                    ]],
+                ]);
+            return (new ContainerFactory())->create($composition->config, $composition->dependencies);
+        };
+
+        $factory = \Componenta\Http\Router\Factory\RouteLocatorFactory::class;
+        expect($factory::cacheFile($container('alias/routes.php', 'a/b/routes.php')))->toBe($otherFile)
+            ->and($factory::cacheFile($container('source.php', 'a/b/routes.php'), [$sourceFile]))->toBe($otherFile);
+
+        $future = $root . '/a/b/future/nested/map.php';
+        $reservedFuture = $root . '/a\b/future/nested/map.php';
+        expect($factory::cacheFile($container('alias/future/nested/map.php', 'a/b/future/nested/map.php')))->toBe($future)
+            ->and($factory::cacheFile($container('source.php', 'a/b/future/nested/map.php'), [$reservedFuture]))->toBe($future);
+
+        expect(fn () => $factory::cacheFile($container('alias/routes.php', 'alias/routes.php')))
+            ->toThrow(InvalidArgumentException::class, 'must not overwrite its source file')
+            ->and(fn () => $factory::cacheFile($container('source.php', 'alias/routes.php'), [$sourceFile]))
+            ->toThrow(InvalidArgumentException::class, 'another application artifact')
+            ->and(fn () => $factory::cacheFile($container('source.php', 'alias/future/nested/map.php'), [$reservedFuture]))
+            ->toThrow(InvalidArgumentException::class, 'another application artifact');
+    } finally {
+        if (is_link($alias)) { unlink($alias); }
+        if (is_file($sourceFile)) { unlink($sourceFile); }
+        if (is_file($otherFile)) { unlink($otherFile); }
+        rmdir($root . '/a\b');
+        rmdir($root . '/a/b');
+        rmdir($root . '/a');
+        rmdir($root);
+    }
+});
