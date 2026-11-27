@@ -336,3 +336,5 @@ If a route contains nested array references that cannot be preserved by a prepar
 PCRE failures during runtime matching and built-in URL verification raise `RoutePatternException`, including when an application error handler converts a PCRE warning into an exception. In that case the original exception is retained as the cause; the router does not replace the application's error handler on the matching path.
 
 When loading a source file, `RouteLocator::getRoutes()` checks that `routesVarName` is a valid local PHP variable name without the leading dollar sign. Loader argument names, `this`, `GLOBALS` and PHP superglobal names are reserved. Invalid names throw `InvalidArgumentException` before the source file is executed. The setting is ignored in standalone cache mode.
+
+Inline constraints support Perl extended character classes `(?[...])` when the PHP PCRE2 library supports them (10.45 or newer), including grouping, set operations and nested ordinary character classes. PCRE2 remains responsible for validating the expression.

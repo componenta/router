@@ -100,6 +100,9 @@ final class InlineConstraint
      */
     private static function opaqueGroupEnd(string $text, int $start): int|false|null
     {
+        if (substr_compare($text, '(?[', $start, 3) === 0) {
+            return self::extendedClassEnd($text, $start + 3);
+        }
         $kind = $text[$start + 1] ?? '';
         if ($kind === '*') {
             foreach (['(*:', '(*MARK:', '(*PRUNE:', '(*SKIP:', '(*THEN:', '(*COMMIT:', '(*ACCEPT:'] as $prefix) {
@@ -124,7 +127,34 @@ final class InlineConstraint
         return false;
     }
 
-    private static function characterClassEnd(string $text, int $start): int|false
+    /** Locate the end of a Perl extended character class (?[...]). */
+    private static function extendedClassEnd(string $text, int $offset): int|false
+    {
+        // The outer brackets enclose a set expression, not an ordinary class.
+        // Nested ordinary classes run in extended-more mode (space/tab ignored).
+        for ($i = $offset, $length = strlen($text); $i < $length; ++$i) {
+            $char = $text[$i];
+            if ($char === '\\') {
+                $escape = $text[$i + 1] ?? '';
+                if ($escape === 'Q') {
+                    $end = strpos($text, '\\E', $i + 2);
+                    if ($end === false) { return false; }
+                    $i = $end + 1;
+                } else {
+                    $i += $escape === 'c' ? 2 : 1;
+                }
+            } elseif ($char === '[') {
+                $end = self::characterClassEnd($text, $i, true);
+                if ($end === false) { return false; }
+                $i = $end;
+            } elseif ($char === ']') {
+                return ($text[$i + 1] ?? '') === ')' ? $i + 1 : false;
+            }
+        }
+        return false;
+    }
+
+    private static function characterClassEnd(string $text, int $start, bool $extendedMore = false): int|false
     {
         $hasAtom = false;
         $mayNegate = true;
@@ -142,6 +172,8 @@ final class InlineConstraint
                 }
                 if ($escape === 'E') { ++$i; continue; }
                 $i += $escape === 'c' ? 2 : 1;
+            } elseif ($extendedMore && ($char === ' ' || $char === "\t")) {
+                continue;
             } elseif ($char === '^' && $mayNegate) {
                 $mayNegate = false;
                 continue;

@@ -221,3 +221,69 @@ it('rejects old artifacts whose control-escape suffix semantics differ from the 
         unlink($file);
     }
 });
+
+
+it('preserves Perl extended character classes in all inline syntaxes', function (string $token): void {
+    if (version_compare(explode(' ', PCRE_VERSION, 2)[0], '10.45', '<')) {
+        test()->markTestSkipped('Perl extended character classes require PCRE2 10.45.');
+    }
+
+    foreach ([
+        ['/items/{value:' . $token . '}', false],
+        ['/items/[value:' . $token . ']', false],
+        ['/items/<value:' . $token . '>', false],
+        ['/items/:value(' . $token . ')', false],
+        ['/items/{value:' . $token . '?}', true],
+        ['/items/[?value:' . $token . ']', true],
+        ['/items/<value:' . $token . '?>', true],
+        ['/items/:value(' . $token . ')?', true],
+    ] as [$pattern, $optional]) {
+        $source = (new Routes())->addRoute(RouteRecord::get('item', $pattern, 'H'));
+        $compiled = $source->compiler->compile($pattern);
+        expect($compiled->tokens['value'])->toBe($token)
+            ->and(array_key_exists('value', $compiled->optionalParameters))->toBe($optional);
+        $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+
+        // Independent expression: do not use the router's compiled regex as
+        // the oracle, since source and prepared collections share the lexer.
+        $capture = '(?P<value>' . $token . ')';
+        $expression = '/items' . ($optional ? '(?:/' . $capture . ')?' : '/' . $capture);
+        $oracle = '#\A(?:' . $expression . ')\z#';
+        foreach (['/items', '/items/', '/items/a', '/items/b', '/items/c', '/items/z',
+            '/items/0', '/items/9', '/items/]', '/items/(', '/items/)', '/items/{',
+            '/items/}', '/items/?', '/items/=', '/items/>', '/items/ ', '/items/' . chr(29), '/items/ab'] as $uri) {
+            $matched = preg_match($oracle, $uri, $captures, PREG_UNMATCHED_AS_NULL);
+            expect($matched)->not->toBeFalse();
+            foreach ([$source, $prepared] as $routes) {
+                if ($matched === 1) {
+                    $value = $captures['value'];
+                    $expected = $value === null ? [] : ['value' => in_array($value, ['0', '9'], true) ? (int) $value : $value];
+                    expect($routes->match($routes, $uri, 'GET')->parameters)->toBe($expected);
+                } else {
+                    expect(fn () => $routes->match($routes, $uri, 'GET'))->toThrow(RouteNotFoundException::class);
+                }
+            }
+        }
+
+        foreach (['a', 'b', 'z', '0', '9'] as $value) {
+            if (preg_match('#\A(?:' . $token . ')\z#', $value) === 1) {
+                foreach ([$source, $prepared] as $routes) {
+                    expect($routes->generate($routes, 'item', ['value' => $value]))->toBe('/items/' . $value);
+                }
+            }
+        }
+    }
+})->with([
+    '(?[ ([a-z] - [aeiou]) | [0-9] ])',
+    '(?[ [a-z] & ([aeiou] | [b]) ])',
+    '(?[ ([0-9] | [=?>)]) - [5] ])',
+    '(?[ [ ]a] ])',
+    '(?[ [ ^]a] ])',
+    '(?[ [^ ]a] ])',
+    "(?[ [\t]a] ])",
+    '(?[ [\Q ]\E] ])',
+    '(?[ [:alpha:] - [a] ])',
+    '(?[ \d | \x{5d} ])',
+    '(?[ \c] ])',
+    '(?[ \] ])',
+]);
