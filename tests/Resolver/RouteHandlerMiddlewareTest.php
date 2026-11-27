@@ -86,3 +86,28 @@ describe('RouteHandlerMiddleware', function () {
             ->and($executor->calls)->toBe(1);
     });
 });
+
+
+it('keeps the selected callable when caller references to its receiver and method change', function (): void {
+    $controller = new class {
+        public function show(): ResponseInterface { return new Response(201); }
+        public function delete(): ResponseInterface { return new Response(410); }
+    };
+    $method = 'show';
+    $executor = new RouteHandlerMiddlewareCountingExecutor();
+    $middleware = new RouteHandlerMiddleware([&$controller, &$method], $executor);
+    $request = new ServerRequest('GET', '/');
+    $next = routeHandlerMiddlewareTerminal();
+
+    expect($middleware->process($request, $next)->getStatusCode())->toBe(201);
+    $method = 'delete';
+    expect($middleware->process($request, $next)->getStatusCode())->toBe(201);
+    $method = 'show';
+    $controller = new class {
+        public function show(): ResponseInterface { return new Response(202); }
+    };
+    expect($middleware->process($request, $next)->getStatusCode())->toBe(201);
+    $method = 'missing';
+    expect($middleware->process($request, $next)->getStatusCode())->toBe(201)
+        ->and($executor->calls)->toBe(4);
+});
