@@ -153,6 +153,8 @@ $url = $routes->generate($routes, 'home');
 
 `Routes` compiles static and dynamic lookup tables lazily after registration. Static routes use hash lookup. Dynamic routes use compiled regex patterns.
 
+When constructed with a custom parser list, `CompositeSyntax` snapshots its top-level slots and preserves parser order and object identity. Later replacement of a caller-owned reference does not change the compiler's parser selection. Custom parser objects themselves must keep their behavior stable while the collection is in use.
+
 `Routes` accepts an optional `SyntaxParserInterface` as the named `syntax` argument for URL generation. When omitted, it uses the built-in `Compiler` syntax, or `CompositeSyntax` for another `CompilerInterface` implementation. A custom compiler does not need to expose a `syntax` property.
 
 ## Router Facade

@@ -39,7 +39,8 @@ final readonly class CompositeSyntax implements SyntaxParserInterface
         ?SyntaxParserInterface $fallback = null,
     ) {
         $this->builtInOrder = $syntaxes === null;
-        $this->syntaxes = $syntaxes ?? [
+        // Keep the configured parser order independent of caller-owned slots.
+        $this->syntaxes = $syntaxes !== null ? array_map(static fn (mixed $syntax): mixed => $syntax, $syntaxes) : [
             new CurlySyntax(),         // { is unambiguous
             new AngleBracketSyntax(),  // <name is unambiguous
             new ColonSyntax(),         // :name (careful with :// and ::)
