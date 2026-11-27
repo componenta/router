@@ -54,11 +54,12 @@ final class RouteCacheGenerator
 
     /**
      * Compile routes into cache-ready data structure.
+     * @throws UnsupportedRouteCacheException When the source configuration cannot be preserved in a prepared map.
      *
      * Separates static and dynamic routes, chooses optimal storage strategy.
      *
      * @param RouteCollectorInterface $routes Routes to compile
-     * @return array{version: int, fingerprint: ?string, staticRoutes?: array, routeData?: array, dynamicIndex?: array, methodAliases?: array, defaultTokens?: array, generationSyntax?: class-string, compilerSyntax?: class-string, explicitGenerationSyntax?: bool}
+     * @return array{version: int, fingerprint: string, staticRoutes?: array, routeData?: array, dynamicIndex?: array, methodAliases?: array, defaultTokens?: array, generationSyntax?: class-string, compilerSyntax?: class-string, explicitGenerationSyntax?: bool}
      */
     public function compile(RouteCollectorInterface $routes): array
     {
@@ -164,7 +165,11 @@ final class RouteCacheGenerator
             $cache['defaultTokens'] = $defaultTokens;
         }
 
-        return PreparedMap::seal($cache);
+        $sealed = PreparedMap::seal($cache);
+        if ($sealed['fingerprint'] === null) {
+            throw new UnsupportedRouteCacheException('Route cache cannot preserve referenced array slots; use the original route source.');
+        }
+        return $sealed;
     }
 
     /**

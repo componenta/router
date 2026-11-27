@@ -59,3 +59,44 @@ it('rejects a different compiler when preparing a prepared collection', function
     expect($again->generate($again, 'item', ['id' => 'ABC']))->toBe('/items/ABC')
         ->and($again->match($again, '/items/ABC', 'GET')->parameters)->toBe(['id' => 'ABC']);
 });
+
+
+it('rejects unpreparable referenced payloads before returning or publishing an invalid map', function (bool $cyclic): void {
+    $value = 'first';
+    $payload = ['value' => &$value];
+    if ($cyclic) {
+        $payload['self'] =& $payload;
+    }
+
+    $source = new Routes();
+    // MiddlewareGroup snapshots only its top-level definition slots; nested
+    // custom payloads deliberately retain their original value semantics.
+    $source->addRoute(RouteRecord::get('home', '/', 'H', middlewares: [
+        ['payload' => $payload],
+    ]));
+    $generator = new RouteCacheGenerator();
+    expect($source->match($source, '/', 'GET')->name)->toBe('home');
+    expect(fn () => $generator->compile($source))->toThrow(UnsupportedRouteCacheException::class);
+
+    $file = tempnam(sys_get_temp_dir(), 'router-referenced-');
+    if ($file === false) { throw new RuntimeException('Cannot create fixture.'); }
+    try {
+        file_put_contents($file, 'previous artifact');
+        expect(fn () => $generator->generate($source, $file))->toThrow(UnsupportedRouteCacheException::class);
+        expect(file_get_contents($file))->toBe('previous artifact');
+        $value = 'changed';
+        expect($source->getRoute('home')->middlewares->toArray()[0]['payload']['value'])->toBe('changed');
+    } finally {
+        unlink($file);
+    }
+})->with([false, true]);
+
+it('continues to prepare nested reference-free payloads', function (): void {
+    $source = (new Routes())->addRoute(RouteRecord::get('home', '/', 'H', middlewares: [
+        ['payload' => ['value' => 'first']],
+    ]));
+    $map = (new RouteCacheGenerator())->compile($source);
+    expect($map['fingerprint'])->toBeString()
+        ->and(CompiledRoutes::fromArray($map)->getRoute('home')->toArray())
+        ->toBe($source->getRoute('home')->toArray());
+});
