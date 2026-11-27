@@ -26,7 +26,7 @@ final class RouteParameters
 
         // Integer: digits with optional leading minus
         $digits = $value[0] === '-' ? substr($value, 1) : $value;
-        if ($digits !== '' && ctype_digit($digits)) {
+        if ($digits !== '' && strspn($digits, '0123456789') === strlen($digits)) {
             $number = (int) $value;
             return (string) $number === $value ? $number : $value;
         }
@@ -36,7 +36,7 @@ final class RouteParameters
         if ($dotPos !== false) {
             $before = $value[0] === '-' ? substr($value, 1, $dotPos - 1) : substr($value, 0, $dotPos);
             $after = substr($value, $dotPos + 1);
-            if ($before !== '' && ctype_digit($before) && $after !== '' && ctype_digit($after)) {
+            if ($before !== '' && strspn($before, '0123456789') === strlen($before) && $after !== '' && strspn($after, '0123456789') === strlen($after)) {
                 $number = (float) $value;
                 return is_finite($number) && (string) $number === $value ? $number : $value;
             }
