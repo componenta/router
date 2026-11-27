@@ -121,6 +121,7 @@ final class InlineConstraint
             ++$i;
         }
         $unset = false;
+        $setsExtendedMore = false;
         for ($length = strlen($text); $i < $length; ++$i) {
             $option = $text[$i];
             if ($option === ')' || $option === ':') { return [$i, $extendedMore]; }
@@ -131,8 +132,11 @@ final class InlineConstraint
             if ($option === 'x') {
                 $more = ($text[$i + 1] ?? '') === 'x';
                 if ($more) { ++$i; }
-                // Setting x alone clears xx; unsetting either clears both.
-                $extendedMore = !$unset && $more;
+                // Within one option header, any positive xx enables extended
+                // more even when another positive x follows. A separate x-only
+                // header or a negative x/xx clears it.
+                $setsExtendedMore = $setsExtendedMore || (!$unset && $more);
+                $extendedMore = !$unset && $setsExtendedMore;
                 // Further consecutive x characters still select xx.
                 if ($more) {
                     while (($text[$i + 1] ?? '') === 'x') { ++$i; }

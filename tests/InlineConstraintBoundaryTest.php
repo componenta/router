@@ -347,15 +347,29 @@ it('preserves PCRE extended-more option scopes while parsing inline constraints'
     '(?xx)(?-x:[ ]a)[ ](]',
     '(?xx)(?:a|(?-x)b)[ ](]',
     '(?xx:[ ]a])[ ]a',
+    '(?xxix)[ ]a]',
+    '(?xxix)[ ](]',
+    '(?xxix)[ ]=]',
+    '(?xxix)[ ]?]',
+    '(?xxix)[ ]>]',
+    '(?xxix)[ ]}]',
+    '(?xxix:[ ]}])',
+    '(?ixximx)[ ](]',
+    '(?xixx)[ ](]',
+    '(?xxix)a?[ ](]',
+    '(?xxix)(?x)[ ]a',
+    '(?xxix-x)[ ]a',
+    '(?xxix)(?-xx)[ ]a',
+    '(?xxix)(?^)[ ]a',
 ]);
 
-it('rejects version 18 artifacts after the inline option-scope parsing correction', function (): void {
+it('rejects obsolete artifacts after the inline option-scope parsing corrections', function (int $version): void {
     $source = (new Routes())->addRoute(RouteRecord::get('item', '/items/{value:(?xx)[ ](]}', 'H'));
     $map = (new RouteCacheGenerator())->compile($source);
     expect(CompiledRoutes::fromArray($map)->match(CompiledRoutes::fromArray($map), '/items/(', 'GET')->parameters)
         ->toBe(['value' => '(']);
 
-    $map['version'] = 18;
+    $map['version'] = $version;
     $map = \Componenta\Http\Router\Internal\PreparedMap::seal($map);
     expect(CompiledRoutes::tryFromArray($map))->toBeNull();
-});
+})->with([18, 19]);
