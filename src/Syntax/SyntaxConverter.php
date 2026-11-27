@@ -6,102 +6,99 @@ namespace Componenta\Http\Router\Syntax;
 
 use Componenta\Http\Router\Contract\SyntaxConverterInterface;
 use Componenta\Http\Router\Contract\SyntaxParserInterface;
+use Componenta\Http\Router\Internal\InlineConstraint;
+use InvalidArgumentException;
 
 /**
- * Converts route paths between different parameter syntaxes.
+ * Converts normalized parameter layouts to colon syntax.
  *
- * Uses SyntaxParserInterface::parse() to extract parameter information,
- * then replaces placeholders with target syntax format.
- *
- * Extensible: extend this class and override methods for custom syntaxes.
+ * Inline constraints and defaults are deliberately removed. Literal path
+ * segments and the names and optionality of parameters are preserved.
  */
 class SyntaxConverter implements SyntaxConverterInterface
 {
-    public function __construct(
-            public SyntaxParserInterface $syntax = new CompositeSyntax(),
-    ){
-    }
+    public function __construct(public SyntaxParserInterface $syntax = new CompositeSyntax()) {}
 
-    /**
-     * Convert path to ColonSyntax format.
-     *
-     * Required parameters become `:name`, optional become `/:name?`.
-     *
-     * @param string $path Path in any supported syntax
-     * @return string Path in ColonSyntax format
-     */
     public function toColonSyntax(string $path): string
     {
-        $parsed = $this->syntax->parse($path);
-
+        $source = $this->syntax instanceof CompositeSyntax ? $this->syntax->detect($path) : $this->syntax;
+        $parsed = $source->parse($path);
         $required = array_keys($parsed['parameters']);
         $optional = array_keys($parsed['optionalParameters']);
-
-        if (empty($required) && empty($optional)) {
-            return $path;
-        }
-
-        // Normalize first to strip constraints - simplifies replacement
-        $normalized = $this->syntax->normalize($path);
-
+        $normalized = $source->normalize($path);
         $result = $this->replaceParameters($normalized, $required, $optional);
+        $target = new ColonSyntax();
+        $converted = $target->parse($result);
+        if (array_keys($converted['parameters']) !== $required
+            || array_keys($converted['optionalParameters']) !== $optional
+            || (self::isBuiltIn($source) && $source->toRegex($normalized, []) !== $target->toRegex($result, []))) {
+            throw new InvalidArgumentException('Route layout cannot be represented in colon syntax: ' . $path);
+        }
+        return $result;
+    }
 
-        return str_contains($result, '//') ? preg_replace('#/+#', '/', $result) : $result;
+    private static function isBuiltIn(SyntaxParserInterface $syntax): bool
+    {
+        return in_array($syntax::class, [CurlySyntax::class, SquareBracketSyntax::class, AngleBracketSyntax::class, ColonSyntax::class], true);
     }
 
     /**
-     * Replace all parameter placeholders with ColonSyntax format.
-     *
-     * Works on normalized path (no constraints), so simple regex suffices.
-     *
-     * @param string $path Normalized path
-     * @param list<string> $required Required parameter names
-     * @param list<string> $optional Optional parameter names
-     * @return string Path with replaced parameters
+     * @param list<string> $required
+     * @param list<string> $optional
      */
     protected function replaceParameters(string $path, array $required, array $optional): string
     {
-        // Replace optional parameters first (they have markers like ? or [?name])
-        foreach ($optional as $name) {
-            $path = $this->replaceParameter($path, $name, '/:' . $name . '?');
+        if ($required === [] && $optional === []) { return $path; }
+        $source = $this->syntax instanceof CompositeSyntax ? $this->syntax->detect($path) : $this->syntax;
+        if ($source instanceof ColonSyntax) { return $path; }
+        if (self::isBuiltIn($source)) {
+            $replacements = [];
+            foreach ([[$required, ''], [$optional, '?']] as [$names, $marker]) {
+                foreach ($names as $name) {
+                    $placeholder = match ($source::class) {
+                        CurlySyntax::class => '{' . $name . $marker . '}',
+                        SquareBracketSyntax::class => '[' . $marker . $name . ']',
+                        AngleBracketSyntax::class => '<' . $name . $marker . '>',
+                    };
+                    $replacements[$placeholder] = $this->replaceParameter($placeholder, $name, ':' . $name . $marker);
+                }
+            }
+            [$open, $close] = match ($source::class) {
+                CurlySyntax::class => ['{', '}'],
+                SquareBracketSyntax::class => ['[', ']'],
+                AngleBracketSyntax::class => ['<', '>'],
+            };
+            // The source parser may have skipped an invalid literal bracket
+            // pair containing text that looks like a real placeholder.
+            $result = '';
+            $offset = 0;
+            while (($start = strpos($path, $open, $offset)) !== false) {
+                $end = InlineConstraint::bracketEnd($path, $start, $close);
+                if ($end === false) { break; }
+                $placeholder = substr($path, $start, $end - $start + 1);
+                $result .= substr($path, $offset, $start - $offset) . ($replacements[$placeholder] ?? $placeholder);
+                $offset = $end + 1;
+            }
+            return $result . substr($path, $offset);
         }
-
-        // Replace required parameters
-        foreach ($required as $name) {
-            $path = $this->replaceParameter($path, $name, ':' . $name);
-        }
-
+        foreach ($optional as $name) { $path = $this->replaceParameter($path, $name, ':' . $name . '?'); }
+        foreach ($required as $name) { $path = $this->replaceParameter($path, $name, ':' . $name); }
         return $path;
     }
 
-    /**
-     * Replace single parameter in normalized path.
-     *
-     * Handles all syntax forms after normalization (no constraints).
-     *
-     * @param string $path Normalized path
-     * @param string $name Parameter name
-     * @param string $replacement Replacement string
-     * @return string Path with replaced parameter
-     */
     protected function replaceParameter(string $path, string $name, string $replacement): string
     {
+        // Built-in conversion supplies an exact normalized placeholder.
+        if (in_array($path, [
+            '{' . $name . '}', '{' . $name . '?}', '<' . $name . '>', '<' . $name . '?>',
+            '[' . $name . ']', '[?' . $name . ']', ':' . $name, ':' . $name . '?',
+        ], true)) {
+            return $replacement;
+        }
         $q = preg_quote($name, '#');
-
-        // Patterns for normalized paths (no constraints)
-        return preg_replace(
-                [
-                        '#\{' . $q . '\?}#',        // {name?}
-                        '#\{' . $q . '}#',          // {name}
-                        '#<' . $q . '\?>#',         // <name?\>
-                        '#<' . $q . '>#',           // <name>
-                        '#:' . $q . '\?(?=/|$)#',   // :name?
-                        '#:' . $q . '(?=/|$)#',     // :name
-                        '#\[\?' . $q . ']#',        // [?name]
-                        '#\[' . $q . ']#',          // [name]
-                ],
-                $replacement,
-                $path
-        );
+        return preg_replace([
+            '#\{' . $q . '\?}#', '#\{' . $q . '}#', '#<' . $q . '\?>#', '#<' . $q . '>#',
+            '#:' . $q . '\?(?=/|$)#', '#:' . $q . '(?=/|$)#', '#\[\?' . $q . ']#', '#\[' . $q . ']#',
+        ], $replacement, $path);
     }
 }
