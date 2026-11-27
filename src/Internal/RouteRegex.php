@@ -76,17 +76,31 @@ final class RouteRegex
     /** Validate a complete expression and recognize the omitted optional root. */
     public static function withOptionalRoot(string $expression): string
     {
-        return self::probe(self::anchored($expression)) ? '(?:' . $expression . '|/)' : $expression;
+        return self::probe($expression) ? '(?:' . $expression . '|/)' : $expression;
     }
 
-    private static function probe(string $regex): bool
+    /**
+     * Compilation has a fixed, bounded budget independent of request-time PCRE
+     * settings. The interpreted probe runs only on the empty subject.
+     */
+    private static function probe(string $expression): bool
     {
-        // Configuration errors have a stable domain exception, even if
-        // the application converts PHP warnings to exceptions.
+        $restore = [];
         set_error_handler(static fn (): bool => true, E_WARNING);
         try {
-            return self::match($regex, '');
+            foreach (['pcre.backtrack_limit' => '1000000', 'pcre.recursion_limit' => '100000'] as $key => $limit) {
+                $previous = ini_get($key);
+                if ($previous === $limit) { continue; }
+                if ($previous === false || ini_set($key, $limit) === false) {
+                    throw new RoutePatternException('Cannot configure the route compilation PCRE budget.');
+                }
+                $restore[$key] = $previous;
+            }
+            // Avoid a different JIT stack or optimizer changing the build's
+            // decision. Runtime expressions retain their original spelling.
+            return self::match('#(*NO_JIT)\A(?:' . $expression . ')\z#', '');
         } finally {
+            foreach ($restore as $key => $value) { ini_set($key, $value); }
             restore_error_handler();
         }
     }

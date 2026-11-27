@@ -268,3 +268,74 @@ it('loads contextual optional expressions without matching an empty subject duri
     '/a/{first}/{second:(?P=first)}',
     '/[?first]/[?second:(?P=first)]',
 ]);
+
+
+it('keeps first source requests and prepared requests equivalent under changed PCRE limits', function (string $jit): void {
+    $previous = [
+        'pcre.jit' => ini_get('pcre.jit'),
+        'pcre.backtrack_limit' => ini_get('pcre.backtrack_limit'),
+        'pcre.recursion_limit' => ini_get('pcre.recursion_limit'),
+    ];
+    $observe = static function (callable $operation): array {
+        try {
+            return ['result', $operation()];
+        } catch (RouterException|InvalidArgumentException $error) {
+            return [$error::class, $error->getMessage()];
+        }
+    };
+    $match = static function ($routes, string $uri, string $method): array {
+        $result = $routes->match($routes, $uri, $method);
+        return [$result->name, $result->parameters, $result->route->toArray()];
+    };
+
+    try {
+        ini_set('pcre.jit', $jit);
+        foreach ([
+            '/{a?}', '/[?a]', '/<a?>', '/:a?',
+            '/{a?}/{b?}', '/{a?}/{b?}/{c?}/{d?}/{e?}',
+            '/{a:(?:a?){20}?}/{b:(?P=a)?}',
+            '/{value:(?:a?){20}}', '/a/{value?}', '/{a?}{b:a*}',
+            '/{a?}{b:(*ACCEPT)?}/end', '/a/{id}', '/a/{value:a|b}',
+        ] as $pattern) {
+            foreach (['pcre.backtrack_limit', 'pcre.recursion_limit'] as $setting) {
+                foreach ([1, 2, 3, 5, 10, 20, 50, 200] as $limit) {
+                    ini_set('pcre.backtrack_limit', '1000000');
+                    ini_set('pcre.recursion_limit', '100000');
+                    $records = [
+                        RouteRecord::get('dynamic', $pattern, 'H'),
+                        RouteRecord::get('static', '/static', 'H'),
+                    ];
+                    $fresh = static fn (): Routes => Routes::fromResolved($records);
+                    $cached = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($fresh()));
+                    ini_set($setting, (string) $limit);
+
+                    foreach (['/static', '/', '/a', '/a/a', '/missing', '/a/42'] as $uri) {
+                        foreach (['GET', 'DELETE'] as $method) {
+                            // Never warm the source index before the operation.
+                            $source = $fresh();
+                            expect($observe(fn () => $match($source, $uri, $method)))
+                                ->toBe($observe(fn () => $match($cached, $uri, $method)));
+                            expect(ini_get($setting))->toBe((string) $limit);
+                        }
+                    }
+                    foreach ([[], ['a' => 'a', 'b' => 'a', 'value' => 'a', 'id' => 42]] as $parameters) {
+                        $source = $fresh();
+                        expect($observe(fn () => $source->generate($source, 'dynamic', $parameters)))
+                            ->toBe($observe(fn () => $cached->generate($cached, 'dynamic', $parameters)));
+                    }
+                    expect(ini_get($setting))->toBe((string) $limit);
+                }
+            }
+        }
+
+        ini_set('pcre.backtrack_limit', '7');
+        ini_set('pcre.recursion_limit', '13');
+        expect(fn () => (new \Componenta\Http\Router\Compiler())->compile('/{x:(?P=unknown)}'))
+            ->toThrow(\Componenta\Http\Router\Exception\RoutePatternException::class);
+        expect(ini_get('pcre.backtrack_limit'))->toBe('7')
+            ->and(ini_get('pcre.recursion_limit'))->toBe('13')
+            ->and(ini_get('pcre.jit'))->toBe($jit);
+    } finally {
+        foreach ($previous as $key => $value) { ini_set($key, (string) $value); }
+    }
+})->with(['0', '1']);
