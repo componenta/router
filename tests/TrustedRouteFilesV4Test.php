@@ -119,3 +119,31 @@ it('injects the collection without modifying caller-owned context references', f
         unlink($file);
     }
 })->with(['routes', 'r', 'маршруты'])->with([false, true]);
+
+
+it('falls back when even inspecting the cache path produces a filesystem warning', function (bool $throwWarnings): void {
+    $file = 'routerunregistered' . bin2hex(random_bytes(8)) . '://cache.php';
+    $source = (new Routes())->addRoute(\Componenta\Http\Router\RouteRecord::get('home', '/', 'Handler'));
+    $locator = new \Componenta\Http\Router\Locator\CachedRouteLocator($file, static fn () => new class($source) implements \Componenta\Http\Router\Contract\RouteLocatorInterface {
+        public function __construct(private Routes $routes) {}
+        public function getRoutes(array $context = []): \Componenta\Http\Router\Contract\RouteCollectorInterface { return $this->routes; }
+    });
+    $warnings = 0;
+    $handler = static function (int $severity, string $message) use (&$warnings, $throwWarnings): bool {
+        ++$warnings;
+        if ($throwWarnings) { throw new ErrorException($message, 0, $severity); }
+        return true;
+    };
+    set_error_handler($handler);
+    try {
+        expect(CompiledRoutes::tryFromCache($file))->toBeNull()
+            ->and(fn () => CompiledRoutes::fromCache($file))->toThrow(RuntimeException::class, 'Cannot read route cache')
+            ->and($locator->getRoutes())->toBe($source)
+            ->and($warnings)->toBe(0);
+        $current = set_error_handler(static fn () => true);
+        restore_error_handler();
+        expect($current)->toBe($handler);
+    } finally {
+        restore_error_handler();
+    }
+})->with([false, true]);
