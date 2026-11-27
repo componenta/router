@@ -67,10 +67,6 @@ final class RouteCacheGenerator
             throw new UnsupportedRouteCacheException('Route compiler cannot be preserved in a cache; use the original route source.');
         }
 
-        if (($routes instanceof Routes || $routes instanceof CompiledRoutes) && $routes->compiler != $this->compiler) {
-            throw new UnsupportedRouteCacheException('Route cache must use the source collection compiler.');
-        }
-
         $explicitSyntax = ($routes instanceof Routes || $routes instanceof CompiledRoutes) ? $routes->syntax : null;
         $syntax = $explicitSyntax ?? $this->compiler->syntax;
         foreach (['generation' => $syntax, 'compiler' => $this->compiler->syntax] as $role => $parser) {
@@ -80,6 +76,12 @@ final class RouteCacheGenerator
             ], true) || ($parser instanceof CompositeSyntax && $parser != new CompositeSyntax())) {
                 throw new UnsupportedRouteCacheException(sprintf('Route %s syntax cannot be preserved in a cache; use the original route source.', $role));
             }
+        }
+
+        // Compare only after rejecting unsupported syntax. Distinct custom parsers
+        // may contain recursive object graphs that PHP cannot compare by value.
+        if (($routes instanceof Routes || $routes instanceof CompiledRoutes) && $routes->compiler != $this->compiler) {
+            throw new UnsupportedRouteCacheException('Route cache must use the source collection compiler.');
         }
 
         $routeData = [];

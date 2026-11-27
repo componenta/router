@@ -100,3 +100,45 @@ it('continues to prepare nested reference-free payloads', function (): void {
         ->and(CompiledRoutes::fromArray($map)->getRoute('home')->toArray())
         ->toBe($source->getRoute('home')->toArray());
 });
+
+
+it('rejects unsupported recursive syntax before comparing compiler objects', function (bool $composite): void {
+    $makeSyntax = static function () use ($composite): \Componenta\Http\Router\Contract\SyntaxParserInterface {
+        $parser = new class implements \Componenta\Http\Router\Contract\SyntaxParserInterface {
+            private self $cycle;
+            private CurlySyntax $delegate;
+
+            public function __construct()
+            {
+                $this->cycle = $this;
+                $this->delegate = new CurlySyntax();
+            }
+
+            public function canParse(string $pattern): bool { return $this->delegate->canParse($pattern); }
+            public function parse(string $pattern): array { return $this->delegate->parse($pattern); }
+            public function hasParameter(string $segment): bool { return $this->delegate->hasParameter($segment); }
+            public function toRegex(string $pattern, array $tokens): string { return $this->delegate->toRegex($pattern, $tokens); }
+            public function normalize(string $pattern): string { return $this->delegate->normalize($pattern); }
+            public function buildPath(string $pattern, array $params, array $tokens, array $optional, string $routeName): string
+            {
+                return $this->delegate->buildPath($pattern, $params, $tokens, $optional, $routeName);
+            }
+        };
+        return $composite ? new CompositeSyntax([$parser]) : $parser;
+    };
+    $source = (new Routes(new Compiler($makeSyntax())))
+        ->addRoute(RouteRecord::get('item', '/items/{id}', 'Handler'));
+    $generator = new RouteCacheGenerator(new Compiler($makeSyntax()));
+    $file = tempnam(sys_get_temp_dir(), 'router_recursive_syntax_');
+    if ($file === false) { throw new RuntimeException('Cannot create route cache fixture.'); }
+    try {
+        file_put_contents($file, 'previous artifact');
+        expect($source->generate($source, 'item', ['id' => 42]))->toBe('/items/42')
+            ->and($source->match($source, '/items/42', 'GET')->parameters)->toBe(['id' => 42])
+            ->and(fn () => $generator->compile($source))->toThrow(UnsupportedRouteCacheException::class)
+            ->and(fn () => $generator->generate($source, $file))->toThrow(UnsupportedRouteCacheException::class)
+            ->and(file_get_contents($file))->toBe('previous artifact');
+    } finally {
+        unlink($file);
+    }
+})->with(['direct custom syntax' => false, 'custom composite' => true]);
