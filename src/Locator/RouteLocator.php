@@ -22,9 +22,11 @@ use Componenta\Http\Router\Routes;
  * ```php
  * // routes.php
  * // @var Routes $routes
- * $routes->get('home', '/', HomeController::class);
- * $routes->get('users.list', '/users', [UserController::class, 'index']);
- * $routes->get('users.show', '/users/[id]', [UserController::class, 'show']);
+ * use Componenta\Http\Router\RouteRecord;
+ *
+ * $routes->addRoute(RouteRecord::get('home', '/', HomeController::class));
+ * $routes->addRoute(RouteRecord::get('users.list', '/users', [UserController::class, 'index']));
+ * $routes->addRoute(RouteRecord::get('users.show', '/users/[id]', [UserController::class, 'show']));
  * ```
  *
  * Production mode (cached):
@@ -47,7 +49,7 @@ use Componenta\Http\Router\Routes;
  *
  * @see Routes For route registration API
  * @see CompiledRoutes For cached route collection
- * @see RouteCacheGenerator For generating cache files
+ * @see \Componenta\Http\Router\Cache\RouteCacheGenerator For generating cache files
  */
 final class RouteLocator implements RouteLocatorInterface
 {
