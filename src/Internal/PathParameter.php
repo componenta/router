@@ -40,10 +40,13 @@ final class PathParameter
         return implode('/', array_map('rawurlencode', $segments));
     }
 
-    public static function finish(string $path): string
+    public static function finish(string $path, bool $requireRoot = false): string
     {
         if (str_starts_with($path, '//') || str_contains($path, '?') || str_contains($path, '#')) {
             throw new InvalidArgumentException('Generated route must be a path without authority, query or fragment.');
+        }
+        if ($requireRoot && $path !== '' && !str_starts_with($path, '/')) {
+            throw new InvalidArgumentException('Generated route must retain its leading slash.');
         }
         // The matcher consumes the wire-encoded PSR-7 path. Returning a
         // literal which a URI implementation would encode breaks round trips.

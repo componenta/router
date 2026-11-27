@@ -162,3 +162,55 @@ it('round trips generated paths through a real PSR-7 request and matching middle
     ['/caf%C3%A9/:value', ['value' => 'a b'], '/caf%C3%A9/a%20b'],
     ["/a/!$&'()*+,;=:@/~-._", [], "/a/!$&'()*+,;=:@/~-._"],
 ]);
+
+
+it('never generates a relative URI from an absolute route whose optional root separator disappears', function (string $pattern, array $params, string $expected): void {
+    $source = (new Routes())->addRoute(RouteRecord::get('item', $pattern, 'H', tokens: ['id' => '\d+', 'page' => '\d+']));
+    $generator = new RouteCacheGenerator();
+    $map = $generator->compile($source);
+    $file = tempnam(sys_get_temp_dir(), 'router-root-');
+    if ($file === false) { throw new RuntimeException('Cannot create route cache fixture.'); }
+    try {
+        $generator->generate($source, $file);
+        foreach ([$source, CompiledRoutes::fromArray($map), CompiledRoutes::fromCache($file)] as $routes) {
+            expect(fn () => $routes->generate($routes, 'item'))->toThrow(InvalidArgumentException::class)
+                ->and($routes->generate($routes, 'item', $params))->toBe($expected)
+                ->and($routes->match($routes, $expected, 'GET')->name)->toBe('item');
+        }
+    } finally {
+        unlink($file);
+    }
+})->with([
+    ['/{id?}.json', ['id' => 42], '/42.json'],
+    ['/[?id].json', ['id' => 42], '/42.json'],
+    ['/<id?>.json', ['id' => 42], '/42.json'],
+    ['/:id?.json', ['id' => 42], '/42.json'],
+    ['/{id?}/{page?}.json', ['id' => 42, 'page' => 7], '/42/7.json'],
+    ['/[?id]/[?page].json', ['id' => 42, 'page' => 7], '/42/7.json'],
+    ['/<id?>/<page?>.json', ['id' => 42, 'page' => 7], '/42/7.json'],
+    ['/:id?/:page?.json', ['id' => 42, 'page' => 7], '/42/7.json'],
+    ['/{id?}foo:bar', ['id' => 42], '/42foo:bar'],
+    ['/:id?foo:bar', ['id' => 42], '/42foo:bar'],
+]);
+
+it('retains the valid omitted root and root followed by a complete literal segment', function (string $pattern, string $expected): void {
+    $source = (new Routes())->addRoute(RouteRecord::get('item', $pattern, 'H'));
+    $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+    foreach ([$source, $prepared] as $routes) {
+        expect($routes->generate($routes, 'item'))->toBe($expected)
+            ->and($routes->match($routes, $expected, 'GET')->name)->toBe('item');
+    }
+})->with([
+    ['/{id?}', '/'], ['/[?id]', '/'], ['/<id?>', '/'], ['/:id?', '/'],
+    ['/{id?}/end', '/end'], ['/[?id]/end', '/end'], ['/<id?>/end', '/end'], ['/:id?/end', '/end'],
+]);
+
+it('preserves direct relative syntax expansion outside the absolute route collection contract', function (string $syntax): void {
+    $parser = new $syntax();
+    expect($parser->buildPath('relative/path', [], [], [], 'direct'))->toBe('relative/path');
+})->with([
+    \Componenta\Http\Router\Syntax\CurlySyntax::class,
+    \Componenta\Http\Router\Syntax\SquareBracketSyntax::class,
+    \Componenta\Http\Router\Syntax\AngleBracketSyntax::class,
+    \Componenta\Http\Router\Syntax\ColonSyntax::class,
+]);

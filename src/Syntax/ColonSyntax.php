@@ -112,7 +112,7 @@ final class ColonSyntax implements SyntaxParserInterface
             }
             $offset = $parameter['end'];
         }
-        $path = PathParameter::finish($result . substr($pattern, $offset));
+        $path = PathParameter::finish($result . substr($pattern, $offset), str_starts_with($pattern, '/'));
         return $expected === [] ? $path : PathParameter::verify($path, $this->toRegex($pattern, $tokens), $expected, $routeName);
     }
 }

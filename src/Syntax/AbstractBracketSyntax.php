@@ -232,7 +232,7 @@ abstract class AbstractBracketSyntax implements SyntaxParserInterface
             $pos = $end + 1;
         }
 
-        $path = PathParameter::finish($result);
+        $path = PathParameter::finish($result, str_starts_with($pattern, '/'));
         return $expected === [] ? $path : PathParameter::verify($path, $this->toRegex($pattern, $tokens), $expected, $routeName);
     }
 
