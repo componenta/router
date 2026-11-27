@@ -36,7 +36,8 @@
             ]
         },
         "branch-alias": {
-            "dev-refactor/router-v4": "4.0.x-dev"
+            "dev-refactor/router-v4": "4.0.x-dev",
+            "dev-refactor/unified-application-build-2026-11-27": "4.0.x-dev"
         }
     },
     "require-dev": {
