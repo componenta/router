@@ -68,3 +68,49 @@ PHP);
         rmdir($root);
     }
 })->with(['development', 'production'])->with(['missing cache' => false, 'unexportable routes' => true]);
+
+
+it('protects a reserved artifact behind a directory alias before its descendants exist', function (): void {
+    $root = sys_get_temp_dir() . '/route_future_artifact_' . bin2hex(random_bytes(8));
+    mkdir($root);
+    mkdir($root . '/real');
+    if (!@symlink($root . '/real', $root . '/alias')) {
+        rmdir($root . '/real');
+        rmdir($root);
+        test()->markTestSkipped('Symbolic links unavailable.');
+    }
+
+    $container = static function (string $file) use ($root): \Componenta\Config\ContainerValue {
+        $composition = (new ConfigFactory())->create(new Environment([]),
+            static fn (): array => [
+                ConfigKey::ROUTES_FILE => 'routes.php',
+                ConfigKey::ROUTES_CACHE_FILE => $file,
+                DIConfigKey::DEPENDENCIES => [DIConfigKey::SERVICES => [
+                    PathResolverInterface::class => new PathResolver($root),
+                ]],
+            ]);
+        return (new ContainerFactory())->create($composition->config, $composition->dependencies);
+    };
+
+    try {
+        $reserved = $root . '/real/not-yet-created/nested/classes.php';
+        $alias = 'alias/not-yet-created/nested/classes.php';
+        expect(is_dir(dirname($reserved)))->toBeFalse();
+        expect(fn () => \Componenta\Http\Router\Factory\RouteLocatorFactory::cacheFile($container($alias), [$reserved]))
+            ->toThrow(InvalidArgumentException::class, 'another application artifact');
+        $sibling = 'alias/not-yet-created/nested/routes.php';
+        expect(\Componenta\Http\Router\Factory\RouteLocatorFactory::cacheFile($container($sibling), [$reserved]))
+            ->toBe($root . '/' . $sibling);
+
+        // A dangling directory alias is ambiguous until another builder
+        // creates its target. Do not accept a potentially conflicting path.
+        symlink($root . '/future', $root . '/dangling');
+        expect(fn () => \Componenta\Http\Router\Factory\RouteLocatorFactory::cacheFile($container('dangling/map.php')))
+            ->toThrow(InvalidArgumentException::class, 'Cannot resolve route artifact path');
+    } finally {
+        if (is_link($root . '/dangling')) { unlink($root . '/dangling'); }
+        unlink($root . '/alias');
+        rmdir($root . '/real');
+        rmdir($root);
+    }
+});

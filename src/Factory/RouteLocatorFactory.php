@@ -53,13 +53,35 @@ final readonly class RouteLocatorFactory
 
     private static function canonicalPath(string $file): string
     {
-        clearstatcache(true, $file);
-        // Resolve existing files and parent directories, including directory
-        // symlinks. A reserved destination may not exist until the first build.
-        $resolved = realpath($file);
-        if ($resolved === false) {
-            $parent = realpath(dirname($file));
-            $resolved = $parent === false ? $file : $parent . DIRECTORY_SEPARATOR . basename($file);
+        // An artifact directory may not exist during container assembly.
+        // Resolve the nearest existing ancestor, not just the immediate parent.
+        clearstatcache(true);
+        $missing = [];
+        $cursor = $file;
+        while (($resolved = realpath($cursor)) === false) {
+            if (is_link($cursor)) {
+                throw new InvalidArgumentException('Cannot resolve route artifact path: ' . $cursor);
+            }
+            $parent = dirname($cursor);
+            if ($parent === $cursor) {
+                throw new InvalidArgumentException('Cannot resolve route artifact path: ' . $file);
+            }
+            $missing[] = basename($cursor);
+            $cursor = $parent;
+        }
+
+        foreach (array_reverse($missing) as $segment) {
+            if ($segment === '.') { continue; }
+            if ($segment === '..') { $resolved = dirname($resolved); continue; }
+            $resolved = rtrim($resolved, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $segment;
+            // A preceding ".." can lead back into an existing directory.
+            if (is_link($resolved)) {
+                $target = realpath($resolved);
+                if ($target === false) {
+                    throw new InvalidArgumentException('Cannot resolve route artifact path: ' . $resolved);
+                }
+                $resolved = $target;
+            }
         }
         $normalized = str_replace('\\', '/', $resolved);
         return DIRECTORY_SEPARATOR === '\\' ? strtolower($normalized) : $normalized;
