@@ -317,12 +317,13 @@ final readonly class RouteRecord
         ];
     }
 
+    /** Restore the raw handler value emitted by toArray(), not an existing wrapper. */
     public static function fromArray(array $data): self
     {
         return new self(
             name: $data['name'],
             path: $data['path'],
-            handler: $data['handler'],
+            handler: new RouteHandler($data['handler']),
             methods: $data['methods'] ?? null,
             middlewares: $data['middlewares'] ?? [],
             tokens: $data['tokens'] ?? [],

@@ -110,3 +110,21 @@ it('preserves sparse special values and rejects reference slots without serializ
     $changed['routeData']['item.50']['handler'] =& $value;
     expect(\Componenta\Http\Router\Internal\PreparedMap::seal($changed)['fingerprint'])->toBeNull();
 });
+
+
+it('preserves the identity of a wrapped object used as the raw route handler value', function (): void {
+    $value = new \Componenta\Http\Router\RouteHandler('custom-definition');
+    $original = RouteRecord::get('nested', '/nested', new \Componenta\Http\Router\RouteHandler($value));
+    $source = (new Routes())->addRoute($original);
+    $generator = new RouteCacheGenerator();
+    $map = $generator->compile($source);
+    $prepared = CompiledRoutes::fromArray($map);
+    $again = CompiledRoutes::fromArray($generator->compile($prepared));
+
+    foreach ([$source, $prepared, $again] as $routes) {
+        expect($routes->getRoute('nested')->handler->value)->toBe($value)
+            ->and($routes->match($routes, '/nested', 'GET')->handler->value)->toBe($value)
+            ->and($routes->toArray()['nested']->toArray())->toBe($original->toArray())
+            ->and($generator->compile($routes))->toBe($map);
+    }
+});

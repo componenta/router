@@ -121,3 +121,15 @@ it('roundtrips through toArray/fromArray', function () {
         ->and($restored->tokens)->toBe($original->tokens)
         ->and($restored->defaults)->toBe($original->defaults);
 });
+
+
+it('restores the raw handler value without interpreting it as a route wrapper', function (): void {
+    $value = new \Componenta\Http\Router\RouteHandler('custom-definition');
+    $original = RouteRecord::get('nested', '/nested', new \Componenta\Http\Router\RouteHandler($value));
+    $restored = RouteRecord::fromArray($original->toArray());
+    expect($restored->handler->value)->toBe($value)
+        ->and($restored->toArray())->toBe($original->toArray());
+
+    $plain = RouteRecord::fromArray(['name' => 'plain', 'path' => '/plain', 'handler' => 'Handler']);
+    expect($plain->handler->value)->toBe('Handler');
+});
