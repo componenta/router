@@ -220,7 +220,11 @@ final class RouteCacheGenerator
             $tempFile = null;
 
             if (function_exists('opcache_invalidate')) {
-                opcache_invalidate($filename, true);
+                try {
+                    opcache_invalidate($filename, true);
+                } catch (\ErrorException) {
+                    // A restricted OPcache API cannot undo the completed publication.
+                }
             }
         } catch (\ErrorException|\ValueError $error) {
             throw new RuntimeException("Failed to write route cache: $filename", previous: $error);

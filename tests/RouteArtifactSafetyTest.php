@@ -75,3 +75,87 @@ it('keeps filesystem failures and cleanup inside the standalone cache writer con
         rmdir($root);
     }
 })->with(['directory', 'parent-file', 'invalid-name'])->with([false, true]);
+
+it('keeps a successful standalone publication when the OPcache API is restricted', function (): void {
+    if (!function_exists('opcache_invalidate')) {
+        test()->markTestSkipped('The restricted API regression requires OPcache.');
+    }
+
+    $root = sys_get_temp_dir() . '/router_cache_opcache_' . bin2hex(random_bytes(8));
+    mkdir($root);
+    $script = $root . '/probe.php';
+    file_put_contents($script, <<<'PHP'
+<?php
+declare(strict_types=1);
+require $argv[1];
+
+$results = [];
+foreach ([false, true] as $throwWarnings) {
+    $file = __DIR__ . '/cache-' . (int) $throwWarnings . '.php';
+    file_put_contents($file, 'previous map');
+    $warnings = 0;
+    $handler = static function (int $severity, string $message) use (&$warnings, $throwWarnings): bool {
+        ++$warnings;
+        if ($throwWarnings) { throw new ErrorException($message, 0, $severity); }
+        return true;
+    };
+    $failure = null;
+    set_error_handler($handler);
+    try {
+        try {
+            $routes = (new \Componenta\Http\Router\Routes())->addRoute(
+                \Componenta\Http\Router\RouteRecord::get('published', '/published', 'Handler'),
+            );
+            (new \Componenta\Http\Router\Cache\RouteCacheGenerator())->generate($routes, $file);
+        } catch (Throwable $error) {
+            $failure = $error::class . ': ' . $error->getMessage();
+        }
+        $current = set_error_handler(static fn () => true);
+        restore_error_handler();
+        $results[] = [
+            'failure' => $failure,
+            'published' => \Componenta\Http\Router\CompiledRoutes::fromCache($file)->has('published'),
+            'warnings' => $warnings,
+            'handlerRestored' => $current === $handler,
+            'temporaryFiles' => glob($file . '.tmp.*'),
+        ];
+    } finally {
+        restore_error_handler();
+    }
+}
+echo json_encode($results, JSON_THROW_ON_ERROR);
+PHP);
+
+    try {
+        // This setting is PHP_INI_SYSTEM; use a new process instead of an
+        // ineffective ini_set() or a mock of the actual OPcache failure.
+        $process = proc_open([
+            PHP_BINARY, '-d', 'opcache.enable_cli=1',
+            '-d', 'opcache.restrict_api=' . $root . '/not-permitted',
+            $script, dirname(__DIR__) . '/vendor/autoload.php',
+        ], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        if (!is_resource($process)) { throw new RuntimeException('Cannot start OPcache regression process.'); }
+        fclose($pipes[0]);
+        $output = stream_get_contents($pipes[1]);
+        $errors = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $status = proc_close($process);
+
+        expect($status)->toBe(0)->and($errors)->toBe('');
+        $results = json_decode($output, true, flags: JSON_THROW_ON_ERROR);
+        expect($results)->toHaveCount(2);
+        foreach ($results as $result) {
+            expect($result)->toBe([
+                'failure' => null,
+                'published' => true,
+                'warnings' => 0,
+                'handlerRestored' => true,
+                'temporaryFiles' => [],
+            ]);
+        }
+    } finally {
+        foreach (glob($root . '/*') as $file) { unlink($file); }
+        rmdir($root);
+    }
+});
