@@ -184,18 +184,23 @@ final class RouteCacheGenerator
     private function writeFile(string $filename, string $content): void
     {
         $directory = dirname($filename);
+        $tempFile = null;
+        $stream = null;
 
-        if (!is_dir($directory) && !@mkdir($directory, 0755, true) && !is_dir($directory)) {
-            throw new RuntimeException("Failed to create directory: $directory");
-        }
-
-        $tempFile = $filename . '.tmp.' . bin2hex(random_bytes(16));
-        $stream = fopen($tempFile, 'xb');
-        if ($stream === false) {
-            throw new RuntimeException("Failed to create temporary file: $tempFile");
-        }
-
+        set_error_handler(static function (int $severity, string $message, string $file, int $line): never {
+            throw new \ErrorException($message, 0, $severity, $file, $line);
+        }, E_WARNING);
         try {
+            $this->ensureDirectory($directory);
+
+            $candidate = $filename . '.tmp.' . bin2hex(random_bytes(16));
+            $stream = fopen($candidate, 'xb');
+            if ($stream === false) {
+                throw new RuntimeException("Failed to create temporary file: $candidate");
+            }
+            // Only clean up a path after successfully creating it exclusively.
+            $tempFile = $candidate;
+
             if (DIRECTORY_SEPARATOR === '/') {
                 $stat = fstat($stream);
                 if ($stat === false || !chmod($tempFile, ($stat['mode'] & 0o777) & ~0o022)) {
@@ -208,17 +213,47 @@ final class RouteCacheGenerator
             if (!fclose($stream)) {
                 throw new RuntimeException("Failed to close temporary file: $tempFile");
             }
+            $stream = null;
             if (!rename($tempFile, $filename)) {
                 throw new RuntimeException("Failed to publish route cache: $filename");
             }
             $tempFile = null;
-        } finally {
-            if (is_resource($stream)) { fclose($stream); }
-            if ($tempFile !== null && is_file($tempFile)) { @unlink($tempFile); }
-        }
 
-        if (function_exists('opcache_invalidate')) {
-            opcache_invalidate($filename, true);
+            if (function_exists('opcache_invalidate')) {
+                opcache_invalidate($filename, true);
+            }
+        } catch (\ErrorException|\ValueError $error) {
+            throw new RuntimeException("Failed to write route cache: $filename", previous: $error);
+        } finally {
+            try {
+                // Cleanup is needed only after a failure. Do not hide the
+                // original exception if closing or unlinking also fails.
+                try {
+                    if (is_resource($stream)) { fclose($stream); }
+                } catch (\Throwable) {}
+                try {
+                    if ($tempFile !== null && is_file($tempFile)) { unlink($tempFile); }
+                } catch (\Throwable) {}
+            } finally {
+                restore_error_handler();
+            }
+        }
+    }
+
+    private function ensureDirectory(string $directory): void
+    {
+        if (is_dir($directory)) { return; }
+
+        try {
+            if (mkdir($directory, 0755, true)) { return; }
+        } catch (\ErrorException $error) {
+            clearstatcache(true, $directory);
+            if (is_dir($directory)) { return; }
+            throw new RuntimeException("Failed to create directory: $directory", previous: $error);
+        }
+        clearstatcache(true, $directory);
+        if (!is_dir($directory)) {
+            throw new RuntimeException("Failed to create directory: $directory");
         }
     }
 }
