@@ -70,7 +70,9 @@ final class RouteBuilder
 
     public function methods(string ...$methods): self
     {
-        $this->methods = array_merge($this->methods, $methods);
+        foreach ($methods as $method) {
+            $this->methods[] = $method;
+        }
         return $this;
     }
 

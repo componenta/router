@@ -92,3 +92,24 @@ it('snapshots handler array slots when setting the handler and preserves handler
         ->and($builder->handler($wrapper)->build()->handler)->toBe($wrapper)
         ->and($builder->handler($original)->build()->handler->value)->toBe($original);
 });
+
+
+it('appends HTTP methods in call order independently of variadic argument names', function (): void {
+    $builder = RouteBuilder::route('item', '/items')->handler('Handler')
+        ->methods(first: 'GET', second: 'HEAD')
+        ->methods(first: 'POST', second: 'CUSTOM')
+        ->methods('GET', 'PATCH');
+
+    expect($builder->build()->methods)->toBe(['GET', 'HEAD', 'POST', 'CUSTOM', 'PATCH']);
+    $source = (new \Componenta\Http\Router\Routes())->addRoute($builder->build());
+    $prepared = \Componenta\Http\Router\CompiledRoutes::fromArray(
+        (new \Componenta\Http\Router\Cache\RouteCacheGenerator())->compile($source)
+    );
+    foreach ([$source, $prepared] as $routes) {
+        foreach (['GET', 'HEAD', 'POST', 'CUSTOM', 'PATCH'] as $method) {
+            expect($routes->match($routes, '/items', $method)->name)->toBe('item');
+        }
+        expect(fn () => $routes->match($routes, '/items', 'DELETE'))
+            ->toThrow(\Componenta\Http\Router\Exception\MethodNotAllowedException::class);
+    }
+});
