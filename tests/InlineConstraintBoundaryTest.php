@@ -30,3 +30,65 @@ it('rejects unfinished placeholders instead of treating them as literal paths', 
     expect(fn () => $routes->match($routes, '/items/abc', 'GET'))->toThrow(InvalidArgumentException::class);
     expect(fn () => (new RouteCacheGenerator())->compile($routes))->toThrow(InvalidArgumentException::class);
 })->with(['/items/{value:[a-z]+', '/items/[value:(abc)', '/items/<value:(abc)', '/items/:value((abc)']);
+
+
+it('preserves quoted class boundaries and control escapes in every inline syntax', function (string $token): void {
+    $oracle = '#\A(?:' . $token . ')\z#';
+    foreach ([
+        '/items/{value:' . $token . '}',
+        '/items/[value:' . $token . ']',
+        '/items/<value:' . $token . '>',
+        '/items/:value(' . $token . ')',
+    ] as $pattern) {
+        $source = (new Routes())->addRoute(RouteRecord::get('item', $pattern, 'Handler'));
+        $compiled = $source->compiler->compile($pattern);
+        expect($compiled->tokens['value'])->toBe($token);
+        $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+        foreach (['a', 'b', ']', '[', ']>', '}', '=', ']}', ')', '])', '[]', 'a]b', '^', '-', chr(29), chr(30), chr(28), chr(9), ''] as $value) {
+            $matches = preg_match($oracle, $value);
+            expect($matches)->not->toBeFalse();
+            foreach ([$source, $prepared] as $routes) {
+                if ($matches === 1) {
+                    expect($routes->match($routes, '/items/' . $value, 'GET')->parameters)
+                        ->toBe(['value' => $value]);
+                } else {
+                    expect(fn () => $routes->match($routes, '/items/' . $value, 'GET'))
+                        ->toThrow(RouteNotFoundException::class);
+                }
+            }
+        }
+    }
+})->with([
+    '[\Q]\E]+',
+    '[\Q]}=\E]+',
+    '[\Q]>\E]+',
+    '[\Q])\E]+',
+    '[\Q[]\E]+',
+    '[a\Q]b\E]+',
+    '[\Q\E]]+',
+    '[^\Q\E]]+',
+    '[\Q\E]a]+',
+    '[\E]a]+',
+    '[^\E]a]+',
+    '[\Q\E^a]+',
+    '[\Q\E[:alpha:]\Q]\E]+',
+    '[\Q[:alpha:]\E]+',
+    '[\Q]\E[:alpha:]]+',
+    '[\Q]\E\Q}\E]+',
+    '[\Q]\E\d]+',
+    '[\Q]\E\]]+',
+    '[\Q]\E-]+',
+    '[\Q\E\Q]\E]+',
+    '[]a]+',
+    '[^]a]+',
+    '[\]]+',
+    '[[:alpha:]\]]+',
+    '[\c]]+',
+    '[\c}]+',
+    '[\c=]+',
+    '\c}',
+    '\c=',
+    '\c]',
+    '\c>',
+    '\c)',
+]);

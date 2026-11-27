@@ -54,6 +54,10 @@ final class InlineConstraint
                     $end = strpos($text, '\\E', $i + 2);
                     if ($end === false) { return false; }
                     $i = $end + 1;
+                } elseif (($text[$i + 1] ?? '') === 'c') {
+                    // A PCRE control escape consumes its following character,
+                    // even when that character is a template delimiter.
+                    $i += 2;
                 } elseif (in_array($text[$i + 1] ?? '', ['k', 'g'], true)
                     && ($text[$i + 2] ?? '') === '<') {
                     $end = strpos($text, '>', $i + 3);
@@ -84,21 +88,35 @@ final class InlineConstraint
 
     private static function characterClassEnd(string $text, int $start): int|false
     {
-        $i = $start + 1;
-        if (($text[$i] ?? '') === '^') { ++$i; }
-        if (($text[$i] ?? '') === ']') { ++$i; }
-        for ($length = strlen($text); $i < $length; ++$i) {
-            if ($text[$i] === '\\') {
-                ++$i;
+        $hasAtom = false;
+        $mayNegate = true;
+        for ($i = $start + 1, $length = strlen($text); $i < $length; ++$i) {
+            $char = $text[$i];
+            if ($char === '\\') {
+                $escape = $text[$i + 1] ?? '';
+                if ($escape === 'Q') {
+                    $end = strpos($text, '\\E', $i + 2);
+                    if ($end === false) { return false; }
+                    // Empty quoting does not consume the first class atom.
+                    if ($end !== $i + 2) { $hasAtom = true; $mayNegate = false; }
+                    $i = $end + 1;
+                    continue;
+                }
+                if ($escape === 'E') { ++$i; continue; }
+                $i += $escape === 'c' ? 2 : 1;
+            } elseif ($char === '^' && $mayNegate) {
+                $mayNegate = false;
                 continue;
-            }
-            if ($text[$i] === '[' && in_array($text[$i + 1] ?? '', [':', '.', '='], true)) {
+            } elseif ($char === ']' && $hasAtom) {
+                return $i;
+            } elseif ($char === '[' && in_array($text[$i + 1] ?? '', [':', '.', '='], true)) {
                 $end = strpos($text, $text[$i + 1] . ']', $i + 2);
                 if ($end === false) { return false; }
                 $i = $end + 1;
-                continue;
             }
-            if ($text[$i] === ']') { return $i; }
+            // The first unescaped ] is literal (also after a negating ^).
+            $hasAtom = true;
+            $mayNegate = false;
         }
         return false;
     }
