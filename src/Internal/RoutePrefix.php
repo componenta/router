@@ -213,7 +213,7 @@ final class RoutePrefix
             $prefix = substr($prefix, 0, $end);
         }
         if ($merged) {
-            $selected = array_values(array_unique($selected));
+            $selected = array_keys($selected);
             sort($selected, SORT_NUMERIC);
         }
         return $selected;
@@ -223,8 +223,14 @@ final class RoutePrefix
     {
         if ($bucket === []) { return; }
         if ($selected === []) { $selected = $bucket; return; }
-        $selected = [...$selected, ...$bucket];
-        $merged = true;
+        // Convert to an ordinal set only when multiple non-empty buckets
+        // contribute candidates. Merge into the set instead of repeatedly
+        // copying the growing list; the single-bucket path stays unchanged.
+        if (!$merged) {
+            $selected = array_fill_keys($selected, true);
+            $merged = true;
+        }
+        $selected += array_fill_keys($bucket, true);
     }
 
     private function __construct() {}

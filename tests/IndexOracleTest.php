@@ -131,3 +131,39 @@ it('keeps a complete literal prefix when omitted parameters cannot join segments
     expect($map['dynamicIndex']['GET']['/docs'])->toBe([0, 1])
         ->and($map['dynamicIndex']['GET']['!end:/docs'])->toBe([2]);
 });
+
+
+it('preserves registration order across many overlapping prefix buckets and methods', function (int $count): void {
+    $source = new Routes();
+    // All prefixes are eligible, but the first registered candidate does not
+    // match. The next registration wins, not the deepest matching prefix.
+    $source->addRoute(new RouteRecord('reject', '/a/{any}', 'Reject', ['GET', 'POST'], tokens: ['any' => 'never']));
+    $prefix = '/a';
+    for ($i = 2; $i <= $count; ++$i) {
+        $prefix .= '/a';
+        $source->addRoute(new RouteRecord('route.' . $i, $prefix . '/{any}', 'Handler', ['GET', 'POST']));
+    }
+    $uri = $prefix . '/target';
+    $generator = new RouteCacheGenerator();
+    $map = $generator->compile($source);
+    $file = tempnam(sys_get_temp_dir(), 'router-overlap-');
+    if ($file === false) { throw new RuntimeException('Cannot create route cache fixture.'); }
+    try {
+        $generator->generate($source, $file);
+        foreach ([$source, CompiledRoutes::fromArray($map), CompiledRoutes::fromCache($file)] as $routes) {
+            foreach (['GET', 'POST'] as $method) {
+                $match = $routes->match($routes, $uri, $method);
+                expect($match->name)->toBe('route.2')
+                    ->and($match->parameters)->toBe(['any' => substr($uri, strlen('/a/a/'))]);
+            }
+            try {
+                $routes->match($routes, $uri, 'DELETE');
+                throw new LogicException('Expected method mismatch.');
+            } catch (\Componenta\Http\Router\Exception\MethodNotAllowedException $error) {
+                expect($error->allowedMethods)->toBe(['GET', 'POST']);
+            }
+        }
+    } finally {
+        unlink($file);
+    }
+})->with([4, 64, 256, 512]);
