@@ -73,6 +73,47 @@ final class RouteRegex
         }
     }
 
+    /**
+     * A route parameter must identify a single PCRE capture. Duplicate-name
+     * mode can otherwise silently return the value of a nested capture.
+     *
+     * @param list<string> $names
+     */
+    public static function assertUniqueParameterCaptures(string $regex, array $names): void
+    {
+        // Built-in templates allocate distinct capture slots. Without J, PCRE
+        // rejects duplicate names assigned to distinct slots itself.
+        if (!str_contains($regex, 'J')) { return; }
+        $validated = false;
+        foreach ($names as $name) {
+            $markers = ['(?P<' . $name . '>', '(?<' . $name . '>', "(?'" . $name . "'"];
+            if (array_sum(array_map(static fn (string $marker): int => substr_count($regex, $marker), $markers)) < 2) { continue; }
+            if (!$validated) {
+                self::validate($regex);
+                $validated = true;
+            }
+            $captures = 0;
+            foreach ($markers as $marker) {
+                $offset = 0;
+                while (($start = strpos($regex, $marker, $offset)) !== false) {
+                    // Let PCRE distinguish actual capture declarations from
+                    // quoted text, character classes and control verb labels.
+                    // A digit is not a valid initial character of a group name.
+                    $probe = $regex;
+                    $probe[$start + strlen($marker) - strlen($name) - 1] = '0';
+                    try {
+                        self::validate($probe);
+                    } catch (RoutePatternException) {
+                        if (++$captures > 1) {
+                            throw new RoutePatternException('Duplicate PCRE capture for route parameter: ' . $name);
+                        }
+                    }
+                    $offset = $start + strlen($marker);
+                }
+            }
+        }
+    }
+
     /** Validate a standalone token without letting its enclosing group repair it. */
     public static function validateFragment(string $pattern): void
     {

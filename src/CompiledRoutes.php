@@ -234,7 +234,10 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 $tokens = [...$defaultTokens, ...($route['tokens'] ?? [])];
                 $simple = $standardSyntax ? RouteRegex::simpleExpression($path, $tokens, $paramNames) : null;
                 if (!is_string($regex) || ($simple !== null && $regex !== $simple)) { return null; }
-                if ($simple === null) { RouteRegex::validate($regex); }
+                if ($simple === null) {
+                    RouteRegex::validate($regex);
+                    RouteRegex::assertUniqueParameterCaptures($regex, $paramNames);
+                }
                 $regexes[$ordinal] = $regex;
                 if (in_array('MARK', $paramNames, true)) { $protectMark[$ordinal] = true; }
                 $prefix = RoutePrefix::indexedKey($path, $standardSyntax, $tokens, $paramNames);

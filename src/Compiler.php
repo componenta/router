@@ -51,6 +51,9 @@ final readonly class Compiler implements CompilerInterface
         if ($parsed['parameters'] !== [] || $parsed['optionalParameters'] !== []) {
             // A completely omitted optional root still has the HTTP path '/'.
             $regex = RouteRegex::withOptionalRoot($regex);
+            if (str_contains($regex, 'J')) {
+                RouteRegex::assertUniqueParameterCaptures(RouteRegex::anchored($regex), array_keys($parsed['parameters'] + $parsed['optionalParameters']));
+            }
         }
 
         return new RouteCompileResult(
