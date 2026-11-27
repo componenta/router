@@ -274,7 +274,7 @@ public function __construct(
 
 `methods` accepts a string (`'GET'`), a `|`-separated string (`'GET|POST'`), or an array (`['GET', 'POST']`). `priority` is used by `componenta/router-app`: when multiple attribute routes can match the same URI, the route with the higher `priority` is added first.
 
-The base router package does not scan this attribute. Discovery belongs to `componenta/router-app`.
+The attribute snapshots the top-level slots of its method, middleware, token and default arrays at construction. Nested middleware payloads and object identities are preserved. The base router package does not scan this attribute. Discovery belongs to `componenta/router-app`.
 
 ## Configuration
 
