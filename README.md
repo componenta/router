@@ -318,3 +318,5 @@ Identical ordered dynamic-route sets across HTTP methods share a single prepared
 A route parameter named `MARK` is supported. If a custom PCRE control verb emits metadata under the same key during matching or generation, the router reports a `RoutePatternException` rather than returning the metadata as the captured value. Avoid that combination.
 
 Simple fixed-segment templates with required single-segment parameters may also use a literal segment at a guaranteed interior position. The index retains the original literal prefix, exact segment count and registration order. Optional parameters, custom expressions and multi-segment captures use conservative selection instead.
+
+URL generation validates the entire assembled path, including literal template segments. Raw ASCII controls, spaces, backslashes and dot segments (including percent-encoded dot segments) are rejected rather than returning paths that clients may rewrite. Matching still uses the configured path and raw request URI. Encoded spaces, ordinary dots in file names and literal interior empty segments remain supported.

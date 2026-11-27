@@ -10,6 +10,8 @@ use Stringable;
 /** @internal URI path encoding and complete-pattern round-trip validation. */
 final class PathParameter
 {
+    private const string CONTROL_BYTES = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f";
+
     public static function encode(mixed $parameter, string $name): string
     {
         if (!is_scalar($parameter) && !$parameter instanceof Stringable) {
@@ -17,7 +19,7 @@ final class PathParameter
         }
 
         $value = (string) $parameter;
-        if (strcspn($value, "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f") !== strlen($value)
+        if (strcspn($value, self::CONTROL_BYTES) !== strlen($value)
             || str_starts_with($value, '/')
             || str_contains($value, '\\')) {
             throw new InvalidArgumentException(sprintf('Invalid path parameter "%s".', $name));
@@ -38,6 +40,19 @@ final class PathParameter
     {
         if (str_starts_with($path, '//') || str_contains($path, '?') || str_contains($path, '#')) {
             throw new InvalidArgumentException('Generated route must be a path without authority, query or fragment.');
+        }
+        if (strcspn($path, self::CONTROL_BYTES . " \\") !== strlen($path)) {
+            throw new InvalidArgumentException('Generated route contains an unsafe literal path character.');
+        }
+        // A client may normalize literal and percent-encoded dot segments.
+        // Validate the assembled path, not just individually encoded parameters.
+        if (str_contains($path, '.') || stripos($path, '%2e') !== false) {
+            foreach (explode('/', $path) as $segment) {
+                $decoded = rawurldecode($segment);
+                if ($decoded === '.' || $decoded === '..') {
+                    throw new InvalidArgumentException('Generated route contains a dot segment.');
+                }
+            }
         }
         return $path === '' ? '/' : $path;
     }

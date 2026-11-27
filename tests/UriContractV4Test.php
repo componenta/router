@@ -59,3 +59,45 @@ it('preserves literal empty segments and slash sequences inside inline constrain
             ->and($routes->match($routes, '/optional/', 'GET')->name)->toBe('optional');
     }
 });
+
+
+it('rejects unsafe literal path characters and dot segments in the complete generated URI', function (): void {
+    $invalid = [];
+    foreach (array_merge(range(0, 31), [127]) as $byte) {
+        $invalid[] = ['/literal' . chr($byte) . 'end', []];
+    }
+    foreach ([
+        '/a/../b', '/a/.', '/a/%2e%2E/b', '/a/.%2E/b', '/a/%2e./b', '/a/%2e/b',
+        '/a\\b', '/literal space', '/a/{id}/..', '/a/[id]/..', '/a/<id>/..', '/a/:id/..',
+    ] as $path) {
+        $invalid[] = [$path, ['id' => 42]];
+    }
+    $invalid[] = ['/a/.{id?}', []];
+
+    foreach ($invalid as [$path, $params]) {
+        $source = (new Routes())->addRoute(RouteRecord::get('item', $path, 'H'));
+        $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+        foreach ([$source, $prepared] as $routes) {
+            expect(fn () => $routes->generate($routes, 'item', $params))->toThrow(InvalidArgumentException::class);
+        }
+    }
+});
+
+it('preserves valid literal dots, encoded spaces and double-encoded parameter percent characters', function (): void {
+    foreach ([
+        ['/a/.well-known', [], '/a/.well-known'],
+        ['/a/file.txt', [], '/a/file.txt'],
+        ['/a/%20', [], '/a/%20'],
+        ['/a/{value}', ['value' => 'a b'], '/a/a%20b'],
+        ['/a/{value}', ['value' => '%2e'], '/a/%252e'],
+        ['/a//{id?}', [], '/a/'],
+        ['/a//b', [], '/a//b'],
+    ] as [$path, $params, $expected]) {
+        $source = (new Routes())->addRoute(RouteRecord::get('item', $path, 'H'));
+        $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+        foreach ([$source, $prepared] as $routes) {
+            expect($routes->generate($routes, 'item', $params))->toBe($expected)
+                ->and($routes->match($routes, $expected, 'GET')->name)->toBe('item');
+        }
+    }
+});
