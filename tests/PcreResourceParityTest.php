@@ -339,3 +339,40 @@ it('keeps first source requests and prepared requests equivalent under changed P
         foreach ($previous as $key => $value) { ini_set($key, (string) $value); }
     }
 })->with(['0', '1']);
+
+
+it('does not execute lower priority dynamic routes when a static hit establishes an allowed method', function (): void {
+    $jit = ini_get('pcre.jit');
+    $limit = ini_get('pcre.backtrack_limit');
+    try {
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '1000000');
+        $prefix = '/static-priority-' . bin2hex(random_bytes(6));
+        $uri = $prefix . '/' . str_repeat('a', 32) . 'b';
+        $source = new Routes();
+        $source->addRoute(new RouteRecord('exact', $uri, 'H', ['GET', '0']));
+        $source->addRoute(new RouteRecord('dynamic', $prefix . '/{value}', 'H', ['GET', '0'], tokens: ['value' => 'a+a+a+a+a+b']));
+        $source->addRoute(RouteRecord::post('other', $uri, 'H'));
+        $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+
+        ini_set('pcre.backtrack_limit', '1');
+        foreach ([$source, $prepared] as $routes) {
+            expect($routes->match($routes, $uri, 'GET')->name)->toBe('exact');
+            expect($routes->match($routes, $uri, '0')->name)->toBe('exact');
+            try {
+                $routes->match($routes, $uri, 'DELETE');
+                test()->fail('Expected MethodNotAllowedException.');
+            } catch (\Componenta\Http\Router\Exception\MethodNotAllowedException $error) {
+                expect($error->allowedMethods)->toBe(['0', 'GET', 'POST'])
+                    ->and($error->getCode())->toBe(405);
+            }
+            // The dynamic pattern is still evaluated where there is no static match.
+            $dynamicUri = $prefix . '/' . str_repeat('a', 31) . 'b';
+            expect(fn () => $routes->match($routes, $dynamicUri, 'DELETE'))
+                ->toThrow(\Componenta\Http\Router\Exception\RoutePatternException::class);
+        }
+    } finally {
+        ini_set('pcre.jit', (string) $jit);
+        ini_set('pcre.backtrack_limit', (string) $limit);
+    }
+});

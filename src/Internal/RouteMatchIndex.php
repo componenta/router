@@ -49,7 +49,9 @@ final readonly class RouteMatchIndex
             if (isset($paths[$uri])) { $allowed[(string) $other] = true; }
         }
         foreach ($this->dynamic as $other => $buckets) {
-            if ((string) $other === $method) { continue; }
+            // A static hit already establishes this method's availability.
+            // Do not evaluate a lower-priority dynamic expression for it.
+            if ((string) $other === $method || isset($allowed[$other])) { continue; }
             foreach (RoutePrefix::candidates($buckets, $uri, $this->maxPrefixLengths[$other]) as $index) {
                 if (RouteRegex::match($this->regexes[$index], $uri)) {
                     $allowed[(string) $other] = true;
