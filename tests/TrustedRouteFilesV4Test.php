@@ -29,3 +29,71 @@ it('discards unexpected output from an invalid standalone cache without pollutin
         } finally { ob_end_clean(); }
     } finally { unlink($file); }
 });
+
+
+it('rejects invalid and reserved collection variable names before executing the source file', function (string $name): void {
+    $file = tempnam(sys_get_temp_dir(), 'router_invalid_variable_');
+    if ($file === false) { throw new RuntimeException('Cannot create fixture.'); }
+    try {
+        file_put_contents($file, '<?php $probe->executed = true;');
+        $probe = (object) ['executed' => false];
+
+        // This public property may be changed after construction.
+        $locator = new RouteLocator($file, useCache: false);
+        $locator->routesVarName = $name;
+
+        expect(fn () => $locator->getRoutes(['probe' => $probe]))->toThrow(InvalidArgumentException::class)
+            ->and($probe->executed)->toBeFalse();
+    } finally {
+        unlink($file);
+    }
+})->with([
+    'empty' => [''],
+    'numeric' => ['123'],
+    'leading digit' => ['1routes'],
+    'hyphen' => ['my-routes'],
+    'space' => ['route name'],
+    'dollar sign' => ['$routes'],
+    'NUL' => ["a\0b"],
+    'this' => ['this'],
+    'GLOBALS' => ['GLOBALS'],
+    'loader file' => ['__routeFile'],
+    'loader context' => ['__routeContext'],
+    'loader name' => ['__routeVarName'],
+    '_SERVER' => ['_SERVER'],
+    '_GET' => ['_GET'],
+    '_POST' => ['_POST'],
+    '_FILES' => ['_FILES'],
+    '_COOKIE' => ['_COOKIE'],
+    '_SESSION' => ['_SESSION'],
+    '_REQUEST' => ['_REQUEST'],
+    '_ENV' => ['_ENV'],
+]);
+
+it('binds the collection to valid local PHP variable names rather than the supplied context value', function (string $name): void {
+    $file = tempnam(sys_get_temp_dir(), 'router_named_variable_');
+    if ($file === false) { throw new RuntimeException('Cannot create fixture.'); }
+    try {
+        file_put_contents($file, '<?php $' . $name . '->addRoute(\Componenta\Http\Router\RouteRecord::get("custom", "/custom", "Handler"));');
+        $locator = new RouteLocator($file, useCache: false, routesVarName: $name);
+        $routes = $locator->getRoutes([$name => null]);
+        expect($routes)->toBeInstanceOf(Routes::class)
+            ->and($routes->getRoute('custom')->path)->toBe('/custom');
+    } finally {
+        unlink($file);
+    }
+})->with(['routes', 'r', 'Routes_1', '_r', '_', 'маршруты', 'é', '路由', 'GLOBALS_1']);
+
+it('does not validate an unused source variable name when loading a standalone compiled map', function (): void {
+    $file = tempnam(sys_get_temp_dir(), 'router_cache_variable_');
+    if ($file === false) { throw new RuntimeException('Cannot create fixture.'); }
+    try {
+        $source = (new Routes())->addRoute(\Componenta\Http\Router\RouteRecord::get('custom', '/custom', 'Handler'));
+        (new \Componenta\Http\Router\Cache\RouteCacheGenerator())->generate($source, $file);
+        $routes = (new RouteLocator($file, useCache: true, routesVarName: ''))->getRoutes();
+        expect($routes)->toBeInstanceOf(CompiledRoutes::class)
+            ->and($routes->getRoute('custom')->path)->toBe('/custom');
+    } finally {
+        unlink($file);
+    }
+});

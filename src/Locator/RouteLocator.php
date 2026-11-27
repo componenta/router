@@ -57,6 +57,7 @@ final class RouteLocator implements RouteLocatorInterface
      * @param string $filename Path to routes file (PHP config or compiled cache)
      * @param CompilerInterface $compiler Route pattern compiler
      * @param bool|null $useCache Cache mode: true = cached, false = dynamic, null = auto-detect by filename
+     * @param string $routesVarName Local PHP variable name without the leading $ (source mode only)
      */
     public function __construct(
         public string $filename,
@@ -82,15 +83,13 @@ final class RouteLocator implements RouteLocatorInterface
             return CompiledRoutes::fromCache($this->filename);
         }
 
+        self::validateRoutesVarName($this->routesVarName);
         $routes = new Routes($this->compiler);
         $context[$this->routesVarName] = $routes;
 
         // The source may intentionally replace the route collection. Context
         // variables must not replace the loader's own arguments.
         return (static function (string $__routeFile, array $__routeContext, string $__routeVarName): Routes {
-            if (in_array($__routeVarName, ['__routeFile', '__routeContext', '__routeVarName', 'this', 'GLOBALS'], true)) {
-                throw new \InvalidArgumentException('Reserved route collection variable name.');
-            }
             extract($__routeContext, EXTR_SKIP);
             if (!is_file($__routeFile) || !is_readable($__routeFile)) {
                 throw new \RuntimeException('Cannot read route source: ' . $__routeFile);
@@ -98,5 +97,27 @@ final class RouteLocator implements RouteLocatorInterface
             require $__routeFile;
             return ${$__routeVarName};
         })($this->filename, $context, $this->routesVarName);
+    }
+
+    private static function validateRoutesVarName(string $name): void
+    {
+        if (in_array($name, [
+            '__routeFile', '__routeContext', '__routeVarName', 'this', 'GLOBALS',
+            '_SERVER', '_GET', '_POST', '_FILES', '_COOKIE', '_SESSION', '_REQUEST', '_ENV',
+        ], true)) {
+            throw new \InvalidArgumentException('Reserved route collection variable name.');
+        }
+
+        // extract() silently skips invalid identifiers. PHP also permits
+        // non-ASCII bytes in variable names; do not depend on PCRE limits.
+        if ($name === '' || str_contains('0123456789', $name[0])) {
+            throw new \InvalidArgumentException('Invalid route collection variable name.');
+        }
+        for ($i = 0, $length = strlen($name); $i < $length; ++$i) {
+            $byte = $name[$i];
+            if (ord($byte) < 128 && !str_contains('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789', $byte)) {
+                throw new \InvalidArgumentException('Invalid route collection variable name.');
+            }
+        }
     }
 }
