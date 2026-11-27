@@ -224,7 +224,8 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 $regex = $route['regex'] ?? null;
                 $tokens = [...$defaultTokens, ...($route['tokens'] ?? [])];
                 $simple = $standardSyntax ? RouteRegex::simpleExpression($path, $tokens, $paramNames) : null;
-                if (!is_string($regex) || ($simple !== null ? $regex !== $simple : preg_match($regex, '') === false)) { return null; }
+                if (!is_string($regex) || ($simple !== null && $regex !== $simple)) { return null; }
+                if ($simple === null) { RouteRegex::validate($regex); }
                 $regexes[$ordinal] = $regex;
                 if (in_array('MARK', $paramNames, true)) { $protectMark[$ordinal] = true; }
                 $prefix = RoutePrefix::indexedKey($path, $standardSyntax, $tokens, $paramNames);

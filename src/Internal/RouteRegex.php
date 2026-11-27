@@ -57,7 +57,20 @@ final class RouteRegex
 
     public static function validate(string $regex): void
     {
-        self::probe($regex);
+        // Syntax validation must not depend on the cost of matching an empty
+        // subject. PHP reports compile errors separately from execution limits.
+        set_error_handler(static fn (): bool => true, E_WARNING);
+        try {
+            if (preg_match($regex, '') === false && !in_array(preg_last_error(), [
+                PREG_BACKTRACK_LIMIT_ERROR,
+                PREG_RECURSION_LIMIT_ERROR,
+                PREG_JIT_STACKLIMIT_ERROR,
+            ], true)) {
+                throw new RoutePatternException('Route expression failed: ' . preg_last_error_msg());
+            }
+        } finally {
+            restore_error_handler();
+        }
     }
 
     /** Validate a complete expression and recognize the omitted optional root. */

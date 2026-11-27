@@ -135,3 +135,71 @@ it('rejects control bytes in generated values regardless of PCRE limits', functi
         ini_set('pcre.backtrack_limit', (string) $previous);
     }
 });
+
+
+it('preserves lazy prepared records and map validation when PCRE execution limits change', function (string $setting): void {
+    $oldJit = ini_get('pcre.jit');
+    $oldBacktrack = ini_get('pcre.backtrack_limit');
+    $oldRecursion = ini_get('pcre.recursion_limit');
+    $observe = static function (callable $operation): array {
+        try {
+            return ['result', $operation()];
+        } catch (RouterException $error) {
+            return [$error::class, $error->getMessage()];
+        }
+    };
+
+    try {
+        ini_set('pcre.jit', '0');
+        foreach ([1, 2, 3, 5, 10, 20, 100] as $limit) {
+            ini_set('pcre.backtrack_limit', '1000000');
+            ini_set('pcre.recursion_limit', '100000');
+            $source = new Routes();
+            $token = '(?:a?){20}';
+            $source->addRoute(RouteRecord::get('home', '/home', 'H', tokens: ['unused' => $token]));
+            $source->addRoute(RouteRecord::get('dynamic', '/dynamic/{id}', 'H', tokens: ['unused' => $token]));
+            $source->addRoute(RouteRecord::get('optional', '/{value?}', 'H'));
+            $source->addRoute(RouteRecord::get('other', '/other', 'H'));
+            $map = (new RouteCacheGenerator())->compile($source);
+            $prepared = CompiledRoutes::fromArray($map);
+            $source->match($source, '/other', 'GET');
+
+            // The home and dynamic records in the prepared collection have
+            // not yet been materialized.
+            ini_set('pcre.' . $setting, (string) $limit);
+
+            foreach ([
+                static fn ($routes) => $routes->getRoute('home')->toArray(),
+                static fn ($routes) => $routes->match($routes, '/home', 'GET')->route->toArray(),
+                static fn ($routes) => $routes->match($routes, '/dynamic/42', 'GET')->route->toArray(),
+                static fn ($routes) => $routes->match($routes, '/', 'GET')->parameters,
+            ] as $operation) {
+                expect($observe(fn () => $operation($prepared)))
+                    ->toBe($observe(fn () => $operation($source)));
+            }
+            expect(CompiledRoutes::tryFromArray($map))->not->toBeNull();
+
+            // Invalid syntax must still fail and must not reach an application
+            // warning-to-exception handler.
+            set_error_handler(static fn () => throw new LogicException('Unexpected PHP warning.'));
+            try {
+                expect(fn () => RouteRecord::get('invalid', '/invalid', 'H', tokens: ['bad' => '[']))
+                    ->toThrow(InvalidArgumentException::class);
+            } finally {
+                restore_error_handler();
+            }
+
+            // Actual execution limits remain observable routing errors.
+            if ($limit === 1) {
+                expect(fn () => \Componenta\Http\Router\Internal\RouteRegex::match(
+                    \Componenta\Http\Router\Internal\RouteRegex::anchored($token),
+                    '',
+                ))->toThrow(\Componenta\Http\Router\Exception\RoutePatternException::class);
+            }
+        }
+    } finally {
+        ini_set('pcre.backtrack_limit', (string) $oldBacktrack);
+        ini_set('pcre.recursion_limit', (string) $oldRecursion);
+        ini_set('pcre.jit', (string) $oldJit);
+    }
+})->with(['backtrack_limit', 'recursion_limit']);
