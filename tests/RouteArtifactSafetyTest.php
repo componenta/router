@@ -15,7 +15,13 @@ it('does not replace a standalone map with a closure of different lifetime', fun
         $routes = new Routes();
         $count = 0;
         $routes->addRoute(RouteRecord::get('counter', '/counter', static function () use (&$count): int { return ++$count; }));
-        expect(fn () => (new RouteCacheGenerator())->generate($routes, $file))->toThrow(ExceptionInterface::class);
+        $failure = null;
+        try {
+            (new RouteCacheGenerator())->generate($routes, $file);
+        } catch (Throwable $error) {
+            $failure = $error;
+        }
+        expect($failure)->toBeInstanceOf(ExceptionInterface::class);
         expect(file_get_contents($file))->toBe('previous map');
     } finally { unlink($file); }
 });
