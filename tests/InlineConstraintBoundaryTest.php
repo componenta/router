@@ -287,3 +287,75 @@ it('preserves Perl extended character classes in all inline syntaxes', function 
     '(?[ \c] ])',
     '(?[ \] ])',
 ]);
+
+
+it('preserves PCRE extended-more option scopes while parsing inline constraints', function (string $token): void {
+    foreach ([false, true] as $optional) {
+        foreach ([null, 'fallback'] as $default) {
+            $suffix = $default === null ? '' : '=' . $default;
+            $marker = $optional ? '?' : '';
+            foreach ([
+                '/items/{value:' . $token . $marker . $suffix . '}',
+                '/items/[' . $marker . 'value:' . $token . $suffix . ']',
+                '/items/<value:' . $token . $marker . $suffix . '>',
+                '/items/:value(' . $token . ')' . $marker . $suffix,
+            ] as $pattern) {
+                $source = (new Routes())->addRoute(RouteRecord::get('item', $pattern, 'H'));
+                $compiled = $source->compiler->compile($pattern);
+                $mayOmit = $optional || $default !== null;
+                expect($compiled->tokens['value'])->toBe($token)
+                    ->and(array_key_exists('value', $compiled->optionalParameters))->toBe($mayOmit)
+                    ->and($compiled->defaults['value'] ?? null)->toBe($default);
+                $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+
+                $capture = '(?P<value>' . $token . ')';
+                $oracle = '#\A(?:/items' . ($mayOmit ? '(?:/' . $capture . ')?' : '/' . $capture) . ')\z#';
+                foreach (['/items', '/items/', '/items/a', '/items/b', '/items/]', '/items/(',
+                    '/items/=', '/items/?', '/items/}', '/items/ a', '/items/a]', '/items/a('] as $uri) {
+                    $matched = preg_match($oracle, $uri, $captures, PREG_UNMATCHED_AS_NULL);
+                    expect($matched)->not->toBeFalse();
+                    foreach ([$source, $prepared] as $routes) {
+                        if ($matched === 1) {
+                            $value = $captures['value'] ?? $default;
+                            expect($routes->match($routes, $uri, 'GET')->parameters)
+                                ->toBe($value === null ? [] : ['value' => $value]);
+                        } else {
+                            expect(fn () => $routes->match($routes, $uri, 'GET'))->toThrow(RouteNotFoundException::class);
+                        }
+                    }
+                }
+            }
+        }
+    }
+})->with([
+    '(?xx)[ ]a]',
+    '(?xx)[ ](]',
+    '(?xx)[ ]=]',
+    '(?xx)[ ]?]',
+    '(?xx:[ ](])',
+    '(?xx:[ ]}])',
+    '(?xx)[^ ](]',
+    '(?xx)a?[ ](]',
+    '(?xx)a?[ ]?]',
+    '(?imxx)[ ](]',
+    '(?xx)(?i)[ ](]',
+    '(?xx)(?x)[ ]a',
+    '(?xx)(?-x)[ ]a',
+    '(?xx)(?^)[ ]a',
+    '(?xx)(?^x)[ ]a',
+    '(?xx)(?x:[ ]a)[ ](]',
+    '(?xx)(?-x:[ ]a)[ ](]',
+    '(?xx)(?:a|(?-x)b)[ ](]',
+    '(?xx:[ ]a])[ ]a',
+]);
+
+it('rejects version 18 artifacts after the inline option-scope parsing correction', function (): void {
+    $source = (new Routes())->addRoute(RouteRecord::get('item', '/items/{value:(?xx)[ ](]}', 'H'));
+    $map = (new RouteCacheGenerator())->compile($source);
+    expect(CompiledRoutes::fromArray($map)->match(CompiledRoutes::fromArray($map), '/items/(', 'GET')->parameters)
+        ->toBe(['value' => '(']);
+
+    $map['version'] = 18;
+    $map = \Componenta\Http\Router\Internal\PreparedMap::seal($map);
+    expect(CompiledRoutes::tryFromArray($map))->toBeNull();
+});

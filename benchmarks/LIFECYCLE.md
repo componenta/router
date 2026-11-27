@@ -26,7 +26,7 @@ The OPcache subject explicitly precompiles the artifact before the timer and che
 
 Keep PHP version, PCRE/JIT configuration, OPcache, hardware, fixture size and layout fixed when comparing revisions. Do not use timing-based assertions in the correctness suite. Complex custom PCRE constraints and templates without guaranteed literal segments may still require sequential candidates.
 
-Format 18 executes the same individual expressions in the same order in source and prepared collections. The former combined-expression path is intentionally removed: under restrictive PCRE limits a combined expression can succeed while an individual candidate fails. Collections with indistinguishable literal segments can still have linear candidate scans. Compare resource-limit observations separately from normal timings; the prepared path optimizes construction and artifact loading, not a different matching contract.
+Format 19 executes the same individual expressions in the same order in source and prepared collections. The former combined-expression path is intentionally removed: under restrictive PCRE limits a combined expression can succeed while an individual candidate fails. Collections with indistinguishable literal segments can still have linear candidate scans. Compare resource-limit observations separately from normal timings; the prepared path optimizes construction and artifact loading, not a different matching contract.
 
 For a fixed-width template such as `/items/{id}/s123/{value}`, a guaranteed interior literal also discriminates candidates. This avoids the otherwise linear scan of routes sharing the same prefix and having no literal suffix. Optional or multi-segment templates are not eligible for that optimization.
 
@@ -39,3 +39,5 @@ The deep-URI miss subject exercises an input with 20,000 short segments and an u
 Format 18 keeps the literal prefix only when an omitted optional parameter cannot merge the following text into its final segment; otherwise the parent prefix is indexed. The oracle includes these cases for all four built-in syntaxes.
 
 `OverlappingPrefixBench` measures hot matching and 405 responses with 4, 64, 256 and 512 simultaneously eligible literal prefixes in both source and prepared collections. Run `vendor/bin/phpbench run --filter=OverlappingPrefixBench --report=aggregate`. The first candidate intentionally fails and the next registration succeeds, so the benchmark exercises candidate merging without measuring an unrelated full sequential PCRE miss.
+
+Format 19 retains the index layout and corrects inline PCRE option scope. The format version changes so that artifacts produced by the old lexer cannot silently retain its behavior.

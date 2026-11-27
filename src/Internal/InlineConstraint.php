@@ -43,10 +43,12 @@ final class InlineConstraint
      * Locate a delimiter outside escaped characters, character classes and
      * balanced regex groups. PCRE itself validates the resulting expression.
      */
-    public static function findOutside(string $text, int $offset, string $delimiters): int|false
+    public static function findOutside(string $text, int $offset, string $delimiters, bool $last = false): int|false
     {
         $length = strlen($text);
         $stack = [];
+        $extendedMore = false;
+        $found = false;
         for ($i = $offset; $i < $length; ++$i) {
             $char = $text[$i];
             if ($char === '\\') {
@@ -69,10 +71,12 @@ final class InlineConstraint
                 continue;
             }
             if ($stack === [] && str_contains($delimiters, $char)) {
-                return $i;
+                if (!$last) { return $i; }
+                $found = $i;
+                continue;
             }
             if ($char === '[') {
-                $end = self::characterClassEnd($text, $i);
+                $end = self::characterClassEnd($text, $i, $extendedMore);
                 if ($end === false) { return false; }
                 $i = $end;
                 continue;
@@ -84,14 +88,64 @@ final class InlineConstraint
                     $i = $opaqueEnd;
                     continue;
                 }
+                $options = self::inlineOptions($text, $i, $extendedMore);
+                if ($options !== null) {
+                    [$end, $mode] = $options;
+                    if ($text[$end] === ':') { $stack[] = [')', $extendedMore]; }
+                    $extendedMore = $mode;
+                    $i = $end;
+                    continue;
+                }
             }
             if ($char === '(' || $char === '{') {
-                $stack[] = $char === '(' ? ')' : '}';
-            } elseif ($stack !== [] && end($stack) === $char) {
-                array_pop($stack);
+                $stack[] = [$char === '(' ? ')' : '}', $extendedMore];
+            } elseif ($stack !== [] && end($stack)[0] === $char) {
+                [, $previousMode] = array_pop($stack);
+                if ($char === ')') { $extendedMore = $previousMode; }
             }
         }
-        return false;
+        return $found;
+    }
+
+    /**
+     * Recognize option settings, not other (?...) constructs. PCRE validates
+     * the options; the lexer only needs the extended-more character-class mode.
+     * @return array{int, bool}|null End of option header and new mode.
+     */
+    private static function inlineOptions(string $text, int $start, bool $extendedMore): ?array
+    {
+        if (($text[$start + 1] ?? '') !== '?') { return null; }
+        $i = $start + 2;
+        if (($text[$i] ?? '') === '^') {
+            $extendedMore = false;
+            ++$i;
+        }
+        $unset = false;
+        for ($length = strlen($text); $i < $length; ++$i) {
+            $option = $text[$i];
+            if ($option === ')' || $option === ':') { return [$i, $extendedMore]; }
+            if ($option === '-' && !$unset) {
+                $unset = true;
+                continue;
+            }
+            if ($option === 'x') {
+                $more = ($text[$i + 1] ?? '') === 'x';
+                if ($more) { ++$i; }
+                // Setting x alone clears xx; unsetting either clears both.
+                $extendedMore = !$unset && $more;
+                // Further consecutive x characters still select xx.
+                if ($more) {
+                    while (($text[$i + 1] ?? '') === 'x') { ++$i; }
+                }
+                continue;
+            }
+            if ($option === 'a') {
+                if (isset($text[$i + 1]) && str_contains('DSWPT', $text[$i + 1])) { ++$i; }
+                continue;
+            }
+            if (!str_contains('imnsJUr', $option)) { return null; }
+        }
+        return null;
     }
 
     /**
@@ -245,13 +299,9 @@ final class InlineConstraint
 
     private static function hasOptionalSuffix(string $constraint): bool
     {
-        $last = strlen($constraint) - 1;
-        $offset = 0;
-        while (($marker = self::findOutside($constraint, $offset, '?')) !== false) {
-            if ($marker === $last) { return true; }
-            $offset = $marker + 1;
-        }
-        return false;
+        // Retain option scope across earlier quantifiers. Restarting the scan
+        // at each question mark would forget a preceding (?xx) setting.
+        return self::findOutside($constraint, 0, '?', last: true) === strlen($constraint) - 1;
     }
 
     /**
