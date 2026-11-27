@@ -81,7 +81,7 @@ Static constructors exist for `get`, `post`, `put`, `patch`, `delete`, `head`, `
 
 ## Fluent Builder
 
-`RouteBuilder` is useful when a route is assembled conditionally.
+`RouteBuilder` is useful when a route is assembled conditionally. Bulk `tokens()` and `defaults()` copy their top-level input slots, so later changes to referenced caller variables do not affect the builder and individual overrides do not modify the caller. Route validation still happens when `build()` constructs the record.
 
 ```php
 use Componenta\Http\Router\RouteBuilder;

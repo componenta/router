@@ -82,7 +82,7 @@ final class RouteBuilder
 
     public function tokens(array $tokens): self
     {
-        $this->tokens = array_merge($this->tokens, $tokens);
+        $this->tokens = array_merge($this->tokens, self::snapshot($tokens));
         return $this;
     }
 
@@ -94,8 +94,14 @@ final class RouteBuilder
 
     public function defaults(array $defaults): self
     {
-        $this->defaults = array_merge($this->defaults, $defaults);
+        $this->defaults = array_merge($this->defaults, self::snapshot($defaults));
         return $this;
+    }
+
+    /** Detach caller-owned slots without validating or deep-copying their values. */
+    private static function snapshot(array $values): array
+    {
+        return array_map(static fn (mixed $value): mixed => $value, $values);
     }
 
     public function group(string $name): self
