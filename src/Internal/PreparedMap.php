@@ -40,7 +40,7 @@ final class PreparedMap
         // of serialize_precision; opaque runtime handlers retain their identity.
         // Positions and types are stored separately to avoid placeholder collisions.
         $special = [];
-        $normalized = self::normalize($map, [], $special);
+        $normalized = self::normalize($map, [], $special) ?? $map;
         return hash('xxh128', serialize([$normalized, $special]));
     }
 
@@ -62,23 +62,32 @@ final class PreparedMap
         return $state;
     }
 
-    private static function normalize(array $map, array $path, array &$special): array
+    /** Return null when the subtree needs no normalization, preserving copy-on-write sharing. */
+    private static function normalize(array $map, array $path, array &$special): ?array
     {
+        $changed = false;
         foreach ($map as $key => $value) {
             if (is_array($value)) {
-                $map[$key] = self::normalize($value, [...$path, $key], $special);
+                $child = self::normalize($value, [...$path, $key], $special);
+                if ($child !== null) {
+                    $map[$key] = $child;
+                    $changed = true;
+                }
             } elseif (is_float($value)) {
                 $special[] = [[...$path, $key], 'float', is_nan($value) ? 'nan' : pack('E', $value)];
                 $map[$key] = null;
+                $changed = true;
             } elseif (is_object($value) && !$value instanceof UnitEnum) {
                 $special[] = [[...$path, $key], 'object', $value::class, spl_object_id($value)];
                 $map[$key] = null;
+                $changed = true;
             } elseif (is_resource($value) || gettype($value) === 'resource (closed)') {
                 $special[] = [[...$path, $key], 'resource', gettype($value), (int) $value];
                 $map[$key] = null;
+                $changed = true;
             }
         }
-        return $map;
+        return $changed ? $map : null;
     }
 
     private function __construct() {}
