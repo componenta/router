@@ -203,3 +203,68 @@ it('preserves lazy prepared records and map validation when PCRE execution limit
         ini_set('pcre.jit', (string) $oldJit);
     }
 })->with(['backtrack_limit', 'recursion_limit']);
+
+
+it('loads contextual optional expressions without matching an empty subject during validation', function (string $pattern): void {
+    $oldJit = ini_get('pcre.jit');
+    $oldBacktrack = ini_get('pcre.backtrack_limit');
+    $oldRecursion = ini_get('pcre.recursion_limit');
+    $file = tempnam(sys_get_temp_dir(), 'contextual-route-');
+    if ($file === false) { throw new RuntimeException('Cannot create fixture.'); }
+
+    $observe = static function ($routes, string $uri, string $method): array {
+        try {
+            $match = $routes->match($routes, $uri, $method);
+            return [$match->name, $match->parameters, $match->route->toArray()];
+        } catch (RouterException $error) {
+            return [$error::class, $error->getMessage()];
+        }
+    };
+
+    try {
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '1000000');
+        ini_set('pcre.recursion_limit', '100000');
+        $source = new Routes();
+        $source->addRoute(RouteRecord::get('context', $pattern, 'H'));
+        $source->addRoute(RouteRecord::get('static', '/static', 'H'));
+        $generator = new RouteCacheGenerator();
+        $map = $generator->compile($source);
+        $generator->generate($source, $file);
+        $source->match($source, '/static', 'GET');
+
+        foreach (['backtrack_limit', 'recursion_limit'] as $setting) {
+            foreach ([1, 2, 3, 5, 10, 20, 50] as $limit) {
+                ini_set('pcre.' . $setting, (string) $limit);
+                $fromArray = CompiledRoutes::fromArray($map);
+                $fromFile = CompiledRoutes::fromCache($file);
+                foreach (['/', '/a', '/a/a', '/a/b', '/a/abc/abc', '/static', '/missing/no'] as $uri) {
+                    foreach (['GET', 'DELETE'] as $method) {
+                        $expected = $observe($source, $uri, $method);
+                        expect($observe($fromArray, $uri, $method))->toBe($expected)
+                            ->and($observe($fromFile, $uri, $method))->toBe($expected);
+                    }
+                }
+            }
+            ini_set('pcre.' . $setting, '100000');
+        }
+
+        // A syntactically valid but unrelated expression is not a valid
+        // representation of this contextual constraint even if resealed.
+        $changed = $map;
+        $changed['routeData']['context']['regex'] = '#\A(?:/unrelated)\z#';
+        expect(CompiledRoutes::tryFromArray(PreparedMap::seal($changed)))->toBeNull();
+    } finally {
+        ini_set('pcre.backtrack_limit', (string) $oldBacktrack);
+        ini_set('pcre.recursion_limit', (string) $oldRecursion);
+        ini_set('pcre.jit', (string) $oldJit);
+        unlink($file);
+    }
+})->with([
+    '/{first:(?:a?){20}?}/{second:(?P=first)?}',
+    '/{first:(?:a?){20}?}/{second:(?P=first)?}/{third?}',
+    '/{first?}/{second:(?P=first)?}',
+    '/{first?}/{second:(?P=first)}',
+    '/a/{first}/{second:(?P=first)}',
+    '/[?first]/[?second:(?P=first)]',
+]);

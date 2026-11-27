@@ -173,7 +173,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
         }
 
         $validated = [];
-        $contextCompiler = null;
+        $contextSyntax = null;
         if (!self::isTokenShape($data['defaultTokens'] ?? []) || !self::areIndependentPatterns($data['defaultTokens'] ?? [], $validated)) { return null; }
         $expectedStatic = $expectedDynamic = $names = $regexes = $protectMark = [];
         $standardSyntax = ($data['compilerSyntax'] ?? CompositeSyntax::class) === CompositeSyntax::class;
@@ -210,13 +210,22 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
             RouteDefinition::tokens($raw['tokens'] ?? [], $validated);
             RouteDefinition::defaults($raw['defaults'] ?? []);
             if (!self::areIndependentPatterns($route['tokens'] ?? [], $validated) || !self::areIndependentPatterns($route['optionalParams'] ?? [], $validated)) {
-                // Inline constraints may refer to earlier captures or be
-                // overridden by an explicit token. Validate in their actual context.
-                $contextCompiler ??= new Compiler(self::syntaxFromCache($data['compilerSyntax'] ?? CompositeSyntax::class), $defaultTokens);
-                $compiled = $contextCompiler->compile($path, $raw['tokens'] ?? [], $raw['defaults'] ?? []);
-                if (array_diff_assoc($compiled->tokens, $defaultTokens) !== ($route['tokens'] ?? [])
-                    || $compiled->optionalParameters !== ($route['optionalParams'] ?? [])
-                    || $compiled->parameterNames() !== $paramNames) { return null; }
+                // Check contextual inline metadata without probing the route on an
+                // empty subject again: that probe can exhaust runtime PCRE limits.
+                $contextSyntax ??= self::syntaxFromCache($data['compilerSyntax'] ?? CompositeSyntax::class);
+                $parsed = $contextSyntax->parse($path);
+                $effectiveTokens = array_merge($defaultTokens, $parsed['tokens'], $raw['tokens'] ?? []);
+                if (array_diff_assoc($effectiveTokens, $defaultTokens) !== ($route['tokens'] ?? [])
+                    || $parsed['optionalParameters'] !== ($route['optionalParams'] ?? [])
+                    || array_keys($parsed['parameters'] + $parsed['optionalParameters']) !== $paramNames) { return null; }
+                if ($paramNames !== []) {
+                    $expression = $contextSyntax->toRegex($path, $effectiveTokens);
+                    $regex = $route['regex'] ?? null;
+                    // The build may have added the omitted-root alternative. The
+                    // trusted map records that choice; validate the actual PCRE below.
+                    if ($regex !== RouteRegex::anchored($expression)
+                        && $regex !== RouteRegex::anchored('(?:' . $expression . '|/)')) { return null; }
+                }
             }
             $ordinal = count($names);
             $names[] = (string) $name;
