@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Componenta\Http\Router;
 
 use Componenta\Http\Middleware\MiddlewareGroup;
+use Componenta\Http\Router\Internal\RouteDefinition;
 
 /**
  * Route group that registers routes to the parent collection.
@@ -12,6 +13,10 @@ use Componenta\Http\Middleware\MiddlewareGroup;
 final readonly class RouteGroup
 {
     public ?MiddlewareGroup $middleware;
+    /** @var array<string, string> */
+    public array $tokens;
+    /** @var array<string, scalar|null> */
+    public array $defaults;
 
     private(set) string $fullName;
     private string $fullPrefix;
@@ -39,10 +44,12 @@ final readonly class RouteGroup
         public string $name,
         public string $prefix,
         MiddlewareGroup|array|string $middleware = [],
-        public array $tokens = [],
-        public array $defaults = [],
+        array $tokens = [],
+        array $defaults = [],
         public ?self $parent = null,
     ) {
+        $this->tokens = RouteDefinition::tokens($tokens);
+        $this->defaults = RouteDefinition::defaults($defaults);
         $this->middleware = match (true) {
             $middleware instanceof MiddlewareGroup => $middleware,
             is_string($middleware) => new MiddlewareGroup($middleware),
@@ -59,8 +66,8 @@ final readonly class RouteGroup
         $normalizedPrefix = rtrim($parentPrefix, '/') . '/' . ltrim($prefix, '/');
         $this->fullPrefix = $normalizedPrefix === '/' ? '' : rtrim($normalizedPrefix, '/');
 
-        $this->inheritedTokens = [...($parent?->inheritedTokens ?? []), ...$tokens];
-        $this->inheritedDefaults = [...($parent?->inheritedDefaults ?? []), ...$defaults];
+        $this->inheritedTokens = [...($parent?->inheritedTokens ?? []), ...$this->tokens];
+        $this->inheritedDefaults = [...($parent?->inheritedDefaults ?? []), ...$this->defaults];
         $this->inheritedMiddleware = [
             ...($parent?->inheritedMiddleware ?? []),
             ...($this->middleware?->toArray() ?? []),

@@ -35,3 +35,36 @@ it('applies nested group middleware once in both source and prepared routing', f
             ->and($match->route->group)->toBe('api.admin');
     }
 });
+
+
+it('snapshots group definitions before caller-owned reference slots can change', function (): void {
+    $source = new Routes();
+    $token = '[A-Z]+';
+    $page = 1;
+    $group = $source->group('api', '/api', tokens: ['id' => &$token], defaults: ['page' => &$page]);
+    $token = '[a-z]+';
+    $page = 2;
+
+    expect($group->tokens)->toBe(['id' => '[A-Z]+'])
+        ->and($group->defaults)->toBe(['page' => 1]);
+
+    $group->get('first', '/first/{id}', 'Handler');
+    $group->group('nested', '/nested')->get('second', '/{id}', 'Handler');
+
+    $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+    foreach ([$source, $prepared] as $routes) {
+        foreach (['/api/first/ABC', '/api/nested/ABC'] as $path) {
+            expect($routes->match($routes, $path, 'GET')->parameters)->toBe(['page' => 1, 'id' => 'ABC']);
+        }
+        expect($routes->generate($routes, 'api.nested.second', ['id' => 'ABC']))->toBe('/api/nested/ABC');
+    }
+});
+
+it('rejects invalid group configuration before registering a group', function (): void {
+    $source = new Routes();
+    expect(fn () => $source->group('invalid', '/invalid', tokens: ['id' => '[']))
+        ->toThrow(InvalidArgumentException::class);
+    expect(fn () => $source->group('invalid', '/invalid', defaults: ['id' => []]))
+        ->toThrow(InvalidArgumentException::class);
+    expect($source->groups->has('invalid'))->toBeFalse();
+});
