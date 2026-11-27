@@ -42,7 +42,7 @@ final readonly class SourceRouteIndex
                 $regexes[$ordinal] = $regex;
                 $parameterNames = $compiled->parameterNames();
                 if (in_array('MARK', $parameterNames, true)) { $protectMark[$ordinal] = true; }
-                $prefix = RoutePrefix::indexedKey($route->path, $standardSyntax, $compiled->tokens, $parameterNames);
+                $prefix = RoutePrefix::indexedKey($route->path, $standardSyntax, $compiled->tokens, $parameterNames, $compiled->optionalParameters);
             }
             foreach ($route->methods as $method) {
                 if ($prefix !== null) {

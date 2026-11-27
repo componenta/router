@@ -33,7 +33,7 @@ use Componenta\VarExport\ScalarExporter;
  */
 final class RouteCacheGenerator
 {
-    public const int CACHE_VERSION = 17;
+    public const int CACHE_VERSION = 18;
 
     public function __construct(
         public readonly CompilerInterface $compiler = new Compiler(),

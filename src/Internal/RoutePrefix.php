@@ -9,18 +9,66 @@ use Componenta\Http\Router\Contract\CompilerInterface;
 /** @internal Conservative literal path discriminator shared by both matching paths. */
 final class RoutePrefix
 {
-    public static function forPattern(string $path, bool $standardSyntax): string
+    public static function forPattern(string $path, bool $standardSyntax, array $optional = []): string
     {
         if (!$standardSyntax) { return '*'; }
-        $literal = substr($path, 0, strcspn($path, '[]{}<>:'));
+        $offset = strcspn($path, '[]{}<>:');
+        $literal = substr($path, 0, $offset);
         $end = strrpos($literal, '/');
+        if ($end === false || $end === 0) { return '*'; }
+
+        // An omitted optional parameter consumes its preceding slash. If the
+        // remaining template can join directly to this literal segment, only
+        // the parent prefix is guaranteed to end at a request segment boundary.
+        if ($optional !== [] && $end === $offset - 1
+            && !self::hasGuaranteedBoundary($path, $offset, $optional)) {
+            $end = strrpos(substr($literal, 0, $end), '/');
+        }
         return $end === false || $end === 0 ? '*' : substr($literal, 0, $end);
     }
 
-    /** @param list<string> $names */
-    public static function indexedKey(string $path, bool $standardSyntax, array $tokens, array $names): string
+    /** Check the tail after a possibly omitted slash and optional placeholder. */
+    private static function hasGuaranteedBoundary(string $path, int $offset, array $optional): bool
     {
-        $prefix = self::forPattern($path, $standardSyntax);
+        $marker = $path[$offset] ?? '';
+        $close = match ($marker) {
+            '{' => '}', '[' => ']', '<' => '>', ':' => null,
+            default => '',
+        };
+        if ($close === '') { return true; }
+
+        // A built-in compiler uses one syntax per template. Walk consecutive
+        // optional placeholders whose slashes may all disappear; any required
+        // placeholder or literal after a slash establishes a boundary.
+        do {
+            $nameOffset = $offset + 1 + (int) ($marker === '[' && ($path[$offset + 1] ?? '') === '?');
+            $name = InlineConstraint::nameAt($path, $nameOffset);
+            if ($name === null || !array_key_exists($name, $optional)) { return true; }
+            try {
+                if ($marker === ':') {
+                    $end = InlineConstraint::colonParameter($path, $offset)['end'];
+                } else {
+                    $closing = InlineConstraint::bracketEnd($path, $offset, $close);
+                    if ($closing === false) { return false; }
+                    $end = $closing + 1;
+                }
+            } catch (\InvalidArgumentException) {
+                // A marker belonging to a different syntax can be literal.
+                // Prefer the conservative parent rather than reparsing it.
+                return false;
+            }
+            if ($end === strlen($path)) { return true; }
+            if ($path[$end] !== '/') { return false; }
+            $offset = $end + 1;
+        } while (($path[$offset] ?? '') === $marker);
+
+        return true;
+    }
+
+    /** @param list<string> $names */
+    public static function indexedKey(string $path, bool $standardSyntax, array $tokens, array $names, array $optional = []): string
+    {
+        $prefix = self::forPattern($path, $standardSyntax, $optional);
         if (!$standardSyntax) { return $prefix; }
         $lastSlash = strrpos($path, '/');
         $segment = substr($path, $lastSlash + 1);

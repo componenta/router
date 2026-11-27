@@ -240,7 +240,7 @@ final class CompiledRoutes implements RouteCollectorInterface, MatcherInterface,
                 }
                 $regexes[$ordinal] = $regex;
                 if (in_array('MARK', $paramNames, true)) { $protectMark[$ordinal] = true; }
-                $prefix = RoutePrefix::indexedKey($path, $standardSyntax, $tokens, $paramNames);
+                $prefix = RoutePrefix::indexedKey($path, $standardSyntax, $tokens, $paramNames, $route['optionalParams'] ?? []);
             } elseif (array_key_exists('regex', $route)) { return null; }
             foreach ($methods as $method) {
                 if ($paramNames !== []) {
