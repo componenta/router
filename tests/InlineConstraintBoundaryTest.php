@@ -150,3 +150,74 @@ it('preserves opaque PCRE control verb and string callout payloads in every inli
     'a(?C)b',
     'a(*MARK:label)b',
 ]);
+
+
+it('recognizes the optional suffix only outside PCRE escapes and opaque groups', function (string $text, string $token, bool $optional, ?string $default, string $value): void {
+    foreach (['/items/{value:' . $text . '}', '/items/<value:' . $text . '>'] as $pattern) {
+        $source = (new Routes())->addRoute(RouteRecord::get('item', $pattern, 'H'));
+        $compiled = $source->compiler->compile($pattern);
+        expect($compiled->tokens['value'])->toBe($token)
+            ->and(array_key_exists('value', $compiled->optionalParameters))->toBe($optional)
+            ->and($compiled->defaults['value'] ?? null)->toBe($default);
+        $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+
+        foreach ([$source, $prepared] as $routes) {
+            expect($routes->match($routes, '/items/' . $value, 'GET')->parameters)->toBe(['value' => $value]);
+            if ($optional) {
+                expect($routes->match($routes, '/items', 'GET')->parameters)
+                    ->toBe($default !== null ? ['value' => $default] : []);
+            } else {
+                expect(fn () => $routes->match($routes, '/items', 'GET'))->toThrow(RouteNotFoundException::class);
+            }
+        }
+    }
+})->with([
+    'control question mark' => ['\c?', '\c?', false, null, chr(127)],
+    'prefixed control question mark' => ['a\c?', 'a\c?', false, null, 'a' . chr(127)],
+    'control escape followed by escaped question mark' => ["\\c\\\\?", "\\c\\\\?", false, null, chr(28) . '?'],
+    'optional control question mark' => ['\c??', '\c?', true, null, chr(127)],
+    'control question mark with default' => ['\c?=default', '\c?', true, 'default', chr(127)],
+    'escaped question mark' => ['\?', '\?', false, null, '?'],
+    'optional escaped question mark' => ['\??', '\?', true, null, '?'],
+    'class' => ['[?]', '[?]', false, null, '?'],
+    'optional class' => ['[?]?', '[?]', true, null, '?'],
+    'quoted text' => ['\Q?\E', '\Q?\E', false, null, '?'],
+    'optional quoted text' => ['\Q?\E?', '\Q?\E', true, null, '?'],
+    'group' => ['(?:a?)?', '(?:a?)', true, null, 'a'],
+    'earlier quantifier' => ['a?b?', 'a?b', true, null, 'ab'],
+    'no suffix' => ['a?b', 'a?b', false, null, 'b'],
+    'callout' => ["a(?C'?')?", "a(?C'?')", true, null, 'a'],
+    'mark' => ['a(*MARK:?)?', 'a(*MARK:?)', true, null, 'a'],
+    'escaped backslash then optional suffix' => ["a\\\\?", "a\\\\", true, null, "a\\"],
+    'control escape then escaped question mark then suffix' => ["\\c\\\\??", "\\c\\\\?", true, null, chr(28) . '?'],
+]);
+
+it('rejects old artifacts whose control-escape suffix semantics differ from the current compiler', function (): void {
+    $source = (new Routes())->addRoute(RouteRecord::get('item', '/items/{value:\c\?}', 'H'));
+    $map = (new RouteCacheGenerator())->compile($source);
+    expect($map['version'])->toBe(RouteCacheGenerator::CACHE_VERSION);
+    $prepared = CompiledRoutes::fromArray($map);
+    foreach ([$source, $prepared] as $routes) {
+        expect($routes->match($routes, '/items', 'GET')->parameters)->toBe([])
+            ->and($routes->match($routes, '/items/' . chr(28), 'GET')->parameters)->toBe(['value' => chr(28)]);
+        expect(fn () => $routes->match($routes, '/items/', 'GET'))->toThrow(RouteNotFoundException::class);
+    }
+
+    // A format-16 compiler treated the final question mark as escaped.
+    $old = $map;
+    $old['version'] = 16;
+    $old['routeData']['item']['tokens']['value'] = '\c\?';
+    unset($old['routeData']['item']['optionalParams']);
+    $old['routeData']['item']['regex'] = '#\A(?:/items/(?P<value>\c\?))\z#';
+    $old = \Componenta\Http\Router\Internal\PreparedMap::seal($old);
+    expect(CompiledRoutes::tryFromArray($old))->toBeNull();
+
+    $file = tempnam(sys_get_temp_dir(), 'router-old-optional-');
+    if ($file === false) { throw new RuntimeException('Cannot create fixture.'); }
+    try {
+        file_put_contents($file, '<?php return ' . var_export($old, true) . ';');
+        expect(CompiledRoutes::tryFromCache($file))->toBeNull();
+    } finally {
+        unlink($file);
+    }
+});

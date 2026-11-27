@@ -26,7 +26,7 @@ The OPcache subject explicitly precompiles the artifact before the timer and che
 
 Keep PHP version, PCRE/JIT configuration, OPcache, hardware, fixture size and layout fixed when comparing revisions. Do not use timing-based assertions in the correctness suite. Complex custom PCRE constraints and templates without guaranteed literal segments may still require sequential candidates.
 
-Format 16 executes the same individual expressions in the same order in source and prepared collections. The former combined-expression path is intentionally removed: under restrictive PCRE limits a combined expression can succeed while an individual candidate fails. Collections with indistinguishable literal segments can still have linear candidate scans. Compare resource-limit observations separately from normal timings; the prepared path optimizes construction and artifact loading, not a different matching contract.
+Format 17 executes the same individual expressions in the same order in source and prepared collections. The former combined-expression path is intentionally removed: under restrictive PCRE limits a combined expression can succeed while an individual candidate fails. Collections with indistinguishable literal segments can still have linear candidate scans. Compare resource-limit observations separately from normal timings; the prepared path optimizes construction and artifact loading, not a different matching contract.
 
 For a fixed-width template such as `/items/{id}/s123/{value}`, a guaranteed interior literal also discriminates candidates. This avoids the otherwise linear scan of routes sharing the same prefix and having no literal suffix. Optional or multi-segment templates are not eligible for that optimization.
 

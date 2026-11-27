@@ -191,9 +191,9 @@ final class InlineConstraint
                 $default = substr($constraint, $equal + 1);
                 $constraint = substr($constraint, 0, $equal);
             }
-            // Curly/angle syntax reserves an unescaped final '?' as the
-            // optional marker. Use explicit tokens for a trailing lazy quantifier.
-            if (!$prefixOptional && str_ends_with($constraint, '?') && !self::escapedAt($constraint, strlen($constraint) - 1)) {
+            // Curly/angle syntax reserves a final top-level '?' as the
+            // optional marker, not a character consumed by a PCRE escape.
+            if (!$prefixOptional && str_ends_with($constraint, '?') && self::hasOptionalSuffix($constraint)) {
                 $optional = true;
                 $constraint = substr($constraint, 0, -1);
             }
@@ -211,11 +211,15 @@ final class InlineConstraint
         return ['name' => $name, 'constraint' => $constraint, 'optional' => $optional || $default !== null, 'default' => $default];
     }
 
-    private static function escapedAt(string $text, int $offset): bool
+    private static function hasOptionalSuffix(string $constraint): bool
     {
-        $slashes = 0;
-        while ($offset > 0 && $text[--$offset] === '\\') { ++$slashes; }
-        return $slashes % 2 !== 0;
+        $last = strlen($constraint) - 1;
+        $offset = 0;
+        while (($marker = self::findOutside($constraint, $offset, '?')) !== false) {
+            if ($marker === $last) { return true; }
+            $offset = $marker + 1;
+        }
+        return false;
     }
 
     /**
