@@ -30,6 +30,10 @@ readonly class Route
     /** @var list<string> */
     public array $methods;
     public array $middlewares;
+    /** @var array<string, string> */
+    public array $tokens;
+    /** @var array<string, mixed> */
+    public array $defaults;
 
     /**
      * @param string $name Unique route name
@@ -45,14 +49,22 @@ readonly class Route
         public string $path,
         array|string $methods = ['GET'],
         array|string $middlewares = [],
-        public array $tokens = [],
-        public array $defaults = [],
+        array $tokens = [],
+        array $defaults = [],
         public ?string $group = null,
         public int $priority = 0,
     ) {
-        $this->middlewares = (array) $middlewares;
+        $this->middlewares = self::snapshot((array) $middlewares);
+        $this->tokens = self::snapshot($tokens);
+        $this->defaults = self::snapshot($defaults);
         $this->methods = is_string($methods)
             ? (str_contains($methods, '|') ? explode('|', $methods) : [$methods])
-            : $methods;
+            : self::snapshot($methods);
+    }
+
+    /** Detach metadata slots without changing nested payload or object semantics. */
+    private static function snapshot(array $values): array
+    {
+        return array_map(static fn (mixed $value): mixed => $value, $values);
     }
 }

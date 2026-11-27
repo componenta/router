@@ -64,13 +64,15 @@ final class RouteBuilder
 
     public function handler(mixed $handler): self
     {
-        $this->handler = $handler;
+        $this->handler = is_array($handler) ? self::snapshot($handler) : $handler;
         return $this;
     }
 
     public function methods(string ...$methods): self
     {
-        $this->methods = array_merge($this->methods, $methods);
+        foreach ($methods as $method) {
+            $this->methods[] = $method;
+        }
         return $this;
     }
 

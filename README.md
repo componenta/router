@@ -81,7 +81,7 @@ Static constructors exist for `get`, `post`, `put`, `patch`, `delete`, `head`, `
 
 ## Fluent Builder
 
-`RouteBuilder` is useful when a route is assembled conditionally. Bulk `tokens()` and `defaults()` copy their top-level input slots, so later changes to referenced caller variables do not affect the builder and individual overrides do not modify the caller. Route validation still happens when `build()` constructs the record.
+`RouteBuilder` is useful when a route is assembled conditionally. Array handlers and bulk `tokens()` and `defaults()` copy their top-level input slots, so later changes to referenced caller variables do not affect the builder and individual overrides do not modify the caller. Route validation still happens when `build()` constructs the record.
 
 ```php
 use Componenta\Http\Router\RouteBuilder;
@@ -276,7 +276,7 @@ public function __construct(
 
 `methods` accepts a string (`'GET'`), a `|`-separated string (`'GET|POST'`), or an array (`['GET', 'POST']`). `priority` is used by `componenta/router-app`: when multiple attribute routes can match the same URI, the route with the higher `priority` is added first.
 
-The base router package does not scan this attribute. Discovery belongs to `componenta/router-app`.
+The attribute snapshots the top-level slots of its method, middleware, token and default arrays at construction. Nested middleware payloads and object identities are preserved. The base router package does not scan this attribute. Discovery belongs to `componenta/router-app`.
 
 ## Configuration
 
