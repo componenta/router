@@ -210,6 +210,8 @@ flowchart LR
 
 `DispatchRouteMiddleware` resolves route middleware on every request through the configured factory. The container and middleware resolver determine object lifetimes; compiled route collections preserve the same resolution and execution behavior.
 
+The standalone `RouteHandlerResolverFactory` obtains its optional `Responder` lazily when a handler result needs response normalization. A returned `ResponseInterface`, `MiddlewareInterface`, or `RequestHandlerInterface` is handled directly and can be used without configuring HTTP response factories. String and array results use the application's registered responder, including an already lazy registration. Errors while resolving or using that responder propagate to the caller.
+
 ## Router Exception Handlers
 
 | Handler | Behavior |

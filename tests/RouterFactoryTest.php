@@ -129,8 +129,16 @@ it('resolves the route handler through the configured standalone middleware fact
         new ConfigProvider(),
     );
     $container = (new \Componenta\DI\ContainerFactory())->create($composition->config, $composition->dependencies);
+    $response = new \Nyholm\Psr7\Response(204);
     $middleware = $container->get(\Componenta\Http\Middleware\MiddlewareFactory::class)->createMiddleware(
-        new \Componenta\Http\Router\RouteHandler(static fn () => new \Nyholm\Psr7\Response(204)),
+        new \Componenta\Http\Router\RouteHandler(static fn () => $response),
     );
-    expect($middleware)->toBeInstanceOf(\Componenta\Http\Router\Resolver\RouteHandlerMiddleware::class);
+    $next = new class implements \Psr\Http\Server\RequestHandlerInterface {
+        public function handle(\Psr\Http\Message\ServerRequestInterface $request): \Psr\Http\Message\ResponseInterface
+        {
+            throw new LogicException('The response-returning route must not delegate.');
+        }
+    };
+    expect($middleware)->toBeInstanceOf(\Componenta\Http\Router\Resolver\RouteHandlerMiddleware::class)
+        ->and($middleware->process(new \Nyholm\Psr7\ServerRequest('GET', '/'), $next))->toBe($response);
 });
