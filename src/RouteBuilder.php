@@ -64,7 +64,7 @@ final class RouteBuilder
 
     public function handler(mixed $handler): self
     {
-        $this->handler = $handler;
+        $this->handler = is_array($handler) ? self::snapshot($handler) : $handler;
         return $this;
     }
 
