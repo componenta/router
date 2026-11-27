@@ -376,3 +376,41 @@ it('does not execute lower priority dynamic routes when a static hit establishes
         ini_set('pcre.backtrack_limit', (string) $limit);
     }
 });
+
+
+it('keeps invalid PCRE failures inside the router exception boundary with an application error handler', function (string $syntaxClass, string $pattern): void {
+    $syntax = new $syntaxClass();
+    $generate = static fn () => $syntax->buildPath($pattern, ['id' => 42], ['id' => '['], [], 'invalid');
+    $original = null;
+    try {
+        $generate();
+        throw new LogicException('Expected an invalid PCRE to fail.');
+    } catch (\Componenta\Http\Router\Exception\RoutePatternException $error) {
+        $original = $error->getMessage();
+    }
+
+    $previous = new ErrorException('Application converted a PCRE warning into an exception.');
+    $handler = static fn () => throw $previous;
+    set_error_handler($handler);
+    try {
+        try {
+            $generate();
+            throw new LogicException('Expected an invalid PCRE to fail.');
+        } catch (\Componenta\Http\Router\Exception\RoutePatternException $error) {
+            expect($error->getMessage())->toBe($original)
+                ->and($error->getPrevious())->toBe($previous);
+        }
+
+        expect($syntax->buildPath($pattern, ['id' => 42], ['id' => '\d+'], [], 'valid'))->toBe('/items/42');
+        $current = set_error_handler(static fn () => true);
+        restore_error_handler();
+        expect($current)->toBe($handler);
+    } finally {
+        restore_error_handler();
+    }
+})->with([
+    [\Componenta\Http\Router\Syntax\CurlySyntax::class, '/items/{id}'],
+    [\Componenta\Http\Router\Syntax\SquareBracketSyntax::class, '/items/[id]'],
+    [\Componenta\Http\Router\Syntax\AngleBracketSyntax::class, '/items/<id>'],
+    [\Componenta\Http\Router\Syntax\ColonSyntax::class, '/items/:id'],
+]);

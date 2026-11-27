@@ -41,7 +41,14 @@ final class RouteRegex
     {
         // Do not confuse an invalid expression or an exhausted PCRE limit with a miss.
         $flags = PREG_UNMATCHED_AS_NULL | ($protectMark ? PREG_OFFSET_CAPTURE : 0);
-        $result = @preg_match($regex, $subject, $matches, $flags);
+        try {
+            $result = @preg_match($regex, $subject, $matches, $flags);
+        } catch (\Throwable $error) {
+            // A user-defined error handler can throw even for suppressed PCRE
+            // warnings. Keep the same domain boundary without installing an
+            // error handler on every successful route match.
+            throw new RoutePatternException('Route expression failed: ' . preg_last_error_msg(), previous: $error);
+        }
         if ($result === false) {
             throw new RoutePatternException('Route expression failed: ' . preg_last_error_msg());
         }
