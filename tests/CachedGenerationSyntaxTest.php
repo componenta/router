@@ -33,13 +33,31 @@ it('preserves the configured generation syntax after loading a route cache', fun
         unlink($file);
     }
 })->with([
-    'curly syntax keeps square brackets literal' => [new CurlySyntax(), '/literal/[id]', [], '/literal/[id]'],
-    'unused parameters keep literals unchanged' => [new CurlySyntax(), '/literal/[id]', ['id' => 17], '/literal/[id]'],
+    'curly syntax keeps colon markers literal' => [new CurlySyntax(), '/literal/:id', [], '/literal/:id'],
+    'unused parameters keep literals unchanged' => [new CurlySyntax(), '/literal/:id', ['id' => 17], '/literal/:id'],
     'curly parameter' => [new CurlySyntax(), '/items/{id}', ['id' => 17], '/items/17'],
     'default composite syntax' => [new CompositeSyntax(), '/items/[id]', ['id' => 17], '/items/17'],
-    'square syntax keeps curly braces literal' => [new SquareBracketSyntax(), '/literal/{id}', [], '/literal/{id}'],
-    'angle syntax keeps square brackets literal' => [new AngleBracketSyntax(), '/literal/[id]', [], '/literal/[id]'],
-    'colon syntax keeps square brackets literal' => [new ColonSyntax(), '/literal/[id]', [], '/literal/[id]'],
+    'square syntax keeps colon markers literal' => [new SquareBracketSyntax(), '/literal/:id', [], '/literal/:id'],
+    'angle syntax keeps colon markers literal' => [new AngleBracketSyntax(), '/literal/:id', [], '/literal/:id'],
+    'colon parameter' => [new ColonSyntax(), '/items/:id', ['id' => 17], '/items/17'],
+]);
+
+it('preserves generation rejection of raw bracket literals after loading a route cache', function (SyntaxParserInterface $syntax, string $path): void {
+    $compiler = new Compiler(syntax: $syntax);
+    $source = (new Routes($compiler))->addRoute(RouteRecord::get('literal', $path, 'handler'));
+    $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator($compiler))->compile($source));
+
+    foreach ([$source, $prepared] as $routes) {
+        // Supplying id would let an incorrectly restored composite parser emit
+        // /literal/17 instead of rejecting the selected syntax's raw literal.
+        expect(fn () => $routes->generate($routes, 'literal', ['id' => 17]))->toThrow(InvalidArgumentException::class)
+            ->and($routes->match($routes, $path, 'GET')->parameters)->toBe([]);
+    }
+})->with([
+    'curly syntax with square literal' => [new CurlySyntax(), '/literal/[id]'],
+    'square syntax with curly literal' => [new SquareBracketSyntax(), '/literal/{id}'],
+    'angle syntax with square literal' => [new AngleBracketSyntax(), '/literal/[id]'],
+    'colon syntax with square literal' => [new ColonSyntax(), '/literal/[id]'],
 ]);
 
 it('keeps explicit generation syntax ahead of the compiler syntax', function (): void {
@@ -63,7 +81,7 @@ it('keeps explicit generation syntax ahead of the compiler syntax', function ():
 it('uses the source when cached generation syntax is invalid', function (mixed $invalid): void {
     $compiler = new Compiler(syntax: new CurlySyntax());
     $source = new Routes($compiler);
-    $source->addRoute(RouteRecord::get('literal', '/literal/[id]', 'handler'));
+    $source->addRoute(RouteRecord::get('literal', '/literal/:id', 'handler'));
     $data = (new RouteCacheGenerator($compiler))->compile($source);
     $data['generationSyntax'] = $invalid;
     $file = tempnam(sys_get_temp_dir(), 'invalid_generation_syntax_');
@@ -76,7 +94,7 @@ it('uses the source when cached generation syntax is invalid', function (mixed $
         });
         $routes = $locator->getRoutes();
         expect($routes)->toBe($source)
-            ->and($routes->generate($routes, 'literal'))->toBe('/literal/[id]');
+            ->and($routes->generate($routes, 'literal'))->toBe('/literal/:id');
     } finally {
         unlink($file);
     }
@@ -90,7 +108,7 @@ it('does not overwrite a cache when custom syntax cannot be preserved', function
     $syntax = new CompositeSyntax([new CurlySyntax()], new CurlySyntax());
     $compiler = new Compiler(syntax: $syntax);
     $source = new Routes($compiler);
-    $source->addRoute(RouteRecord::get('literal', '/literal/[id]', 'handler'));
+    $source->addRoute(RouteRecord::get('literal', '/literal/:id', 'handler'));
     $file = tempnam(sys_get_temp_dir(), 'unsupported_generation_syntax_');
     file_put_contents($file, 'previous cache');
 
@@ -98,7 +116,7 @@ it('does not overwrite a cache when custom syntax cannot be preserved', function
         expect(fn () => (new RouteCacheGenerator($compiler))->generate($source, $file))
             ->toThrow(RuntimeException::class, 'Route generation syntax cannot be preserved');
         expect(file_get_contents($file))->toBe('previous cache')
-            ->and($source->generate($source, 'literal'))->toBe('/literal/[id]');
+            ->and($source->generate($source, 'literal'))->toBe('/literal/:id');
     } finally {
         unlink($file);
     }

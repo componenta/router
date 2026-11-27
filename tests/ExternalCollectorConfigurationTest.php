@@ -48,8 +48,8 @@ it('preserves matching and generation configuration for an external collector', 
         unlink($file);
     }
 })->with([
-    'compiler syntax' => [new Compiler(syntax: new CurlySyntax()), null, '/literal/[id]', [], '/literal/[id]', '/literal/[id]', []],
-    'explicit curly generator' => [new Compiler(), new CurlySyntax(), '/literal/[id]', [], '/literal/[id]', '/literal/17', ['id' => 17]],
+    'compiler syntax' => [new Compiler(syntax: new CurlySyntax()), null, '/literal/:id', [], '/literal/:id', '/literal/:id', []],
+    'explicit curly generator' => [new Compiler(), new CurlySyntax(), '/literal/:id', ['id' => 17], '/literal/:id', '/literal/17', ['id' => 17]],
     'explicit square generator' => [new Compiler(syntax: new CurlySyntax()), new SquareBracketSyntax(), '/items/[id]', ['id' => 17], '/items/17', '/items/[id]', []],
     'custom default constraint' => [new Compiler(defaultPatterns: ['id' => '[A-Z]+']), null, '/items/{id}', ['id' => 'ABC'], '/items/ABC', '/items/ABC', ['id' => 'ABC']],
     'standard configuration' => [new Compiler(), null, '/items/{id}', ['id' => 17], '/items/17', '/items/17', ['id' => 17]],
