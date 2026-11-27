@@ -25,6 +25,7 @@ final class RouteLifecycleBench
     private int $last;
     private string $firstUri;
     private string $lastUri;
+    private string $deepMiss;
     private RouteCacheGenerator $generator;
 
     public function provideShapes(): iterable
@@ -53,6 +54,7 @@ final class RouteLifecycleBench
         $this->last = intdiv($params['count'], 2) - 1;
         $this->firstUri = RouteLifecycleFixture::uri(0, $params['layout']);
         $this->lastUri = RouteLifecycleFixture::uri($this->last, $params['layout']);
+        $this->deepMiss = '/absent/' . str_repeat('a/', 20000) . 'end';
         $this->generator = new RouteCacheGenerator();
         $this->source = RouteLifecycleFixture::routes($params['count'], $params['layout']);
         $this->generator->generate($this->source, $this->file);
@@ -176,5 +178,17 @@ final class RouteLifecycleBench
     {
         $routes = $this->current($params);
         $routes->generate($routes, 'd' . $this->last, ['id' => 42]);
+    }
+
+    #[Groups(['lifecycle', 'hot', 'long-uri'])]
+    #[ParamProviders('provideModes')]
+    #[BeforeMethods('setUp')]
+    #[Revs(100)]
+    public function benchDeepNotFound(array $params): void
+    {
+        $routes = $this->current($params);
+        try { $routes->match($routes, $this->deepMiss, 'GET'); }
+        catch (RouteNotFoundException) { return; }
+        throw new \LogicException('Expected deep route miss.');
     }
 }

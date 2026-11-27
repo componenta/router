@@ -11,6 +11,9 @@ use Componenta\Http\Router\HttpMethod;
 /** @internal Shared lookup algorithm for source and prepared definitions. */
 final readonly class RouteMatchIndex
 {
+    /** @var array<string, int> */
+    private array $maxPrefixLengths;
+
     /**
      * @param array<string, array<string, string>> $static
      * @param array<string, array<string, list<int>>> $dynamic
@@ -24,7 +27,9 @@ final readonly class RouteMatchIndex
         private array $names,
         private array $regexes,
         private array $protectMark,
-    ) {}
+    ) {
+        $this->maxPrefixLengths = array_map(RoutePrefix::maxPrefixLength(...), $dynamic);
+    }
 
     public function find(string $uri, string $method, ?array &$matches): string
     {
@@ -34,7 +39,7 @@ final readonly class RouteMatchIndex
         if (isset($this->static[$method][$uri])) {
             return $this->static[$method][$uri];
         }
-        foreach (RoutePrefix::candidates($this->dynamic[$method] ?? [], $uri) as $index) {
+        foreach (RoutePrefix::candidates($this->dynamic[$method] ?? [], $uri, $this->maxPrefixLengths[$method] ?? 0) as $index) {
             if (RouteRegex::match($this->regexes[$index], $uri, $matches, isset($this->protectMark[$index]))) {
                 return $this->names[$index];
             }
@@ -45,7 +50,7 @@ final readonly class RouteMatchIndex
         }
         foreach ($this->dynamic as $other => $buckets) {
             if ((string) $other === $method) { continue; }
-            foreach (RoutePrefix::candidates($buckets, $uri) as $index) {
+            foreach (RoutePrefix::candidates($buckets, $uri, $this->maxPrefixLengths[$other]) as $index) {
                 if (RouteRegex::match($this->regexes[$index], $uri)) {
                     $allowed[(string) $other] = true;
                     break;

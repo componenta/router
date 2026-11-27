@@ -108,12 +108,28 @@ final class RoutePrefix
         return '!' . $segment . ':' . $prefix;
     }
 
+    /** @param array<string, list<int>> $index */
+    public static function maxPrefixLength(array $index): int
+    {
+        $max = 0;
+        foreach ($index as $key => $_) {
+            $offset = $key[0] === '/' ? 0 : strrpos($key, ':');
+            if ($offset === false) { continue; }
+            if ($key[0] !== '/') { ++$offset; }
+            if (($key[$offset] ?? '') === '/') {
+                $max = max($max, strlen($key) - $offset);
+            }
+        }
+        return $max;
+    }
+
     /**
      * @param array<string, list<int>> $index
      * @return list<int>
      */
-    public static function candidates(array $index, string $uri): array
+    public static function candidates(array $index, string $uri, int $maxPrefixLength): array
     {
+        if ($index === []) { return []; }
         $selected = $index['*'] ?? [];
         $merged = false;
         $suffix = '!' . substr($uri, strrpos($uri, '/') + 1) . ':';
@@ -131,7 +147,13 @@ final class RoutePrefix
                 }
             }
         }
+        // No registered literal prefix can exceed this bound. Cut only at
+        // a segment boundary; shorter prefixes and wildcard buckets still apply.
         $prefix = $uri;
+        if (strlen($uri) > $maxPrefixLength) {
+            $prefix = substr($uri, 0, $maxPrefixLength + 1);
+            $prefix = substr($prefix, 0, strrpos($prefix, '/'));
+        }
         while ($prefix !== '') {
             if (isset($index[$prefix])) { self::append($selected, $merged, $index[$prefix]); }
             if (isset($index[$suffix . $prefix])) { self::append($selected, $merged, $index[$suffix . $prefix]); }

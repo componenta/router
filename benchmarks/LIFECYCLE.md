@@ -31,3 +31,5 @@ Format 16 executes the same individual expressions in the same order in source a
 For a fixed-width template such as `/items/{id}/s123/{value}`, a guaranteed interior literal also discriminates candidates. This avoids the otherwise linear scan of routes sharing the same prefix and having no literal suffix. Optional or multi-segment templates are not eligible for that optimization.
 
 In addition to source/prepared equivalence, `tests/IndexOracleTest.php` checks candidate selection against direct matching of individual compiler-produced PCRE expressions (and literal equality for static routes). This avoids using the shared runtime matcher as its own correctness oracle.
+
+The deep-URI miss subject exercises an input with 20,000 short segments and an unmatched first literal. Both paths bound the prefix walk by the longest registered literal prefix for the method. This prevents excessive substring creation and hashing for irrelevant deep request paths. It does not impose a request-length limit; deployments should still enforce their HTTP request limits separately.
