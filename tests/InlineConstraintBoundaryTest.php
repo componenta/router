@@ -92,3 +92,61 @@ it('preserves quoted class boundaries and control escapes in every inline syntax
     '\c>',
     '\c)',
 ]);
+
+
+it('preserves opaque PCRE control verb and string callout payloads in every inline syntax', function (string $token): void {
+    $oracle = '#\A(?:/items/(?P<value>' . $token . '))\z#';
+    foreach ([
+        '/items/{value:' . $token . '}',
+        '/items/[value:' . $token . ']',
+        '/items/<value:' . $token . '>',
+        '/items/:value(' . $token . ')',
+    ] as $pattern) {
+        $source = (new Routes())->addRoute(RouteRecord::get('item', $pattern, 'H'));
+        expect($source->compiler->compile($pattern)->tokens['value'])->toBe($token);
+        $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+
+        foreach (['ab', 'a', 'b', 'c', 'abc', 'aa', 'ba', '', ']', '[', 'a/b'] as $value) {
+            $uri = '/items/' . $value;
+            $matched = preg_match($oracle, $uri, $captures, PREG_UNMATCHED_AS_NULL);
+            expect($matched)->not->toBeFalse();
+            foreach ([$source, $prepared] as $routes) {
+                if ($matched === 1) {
+                    expect($routes->match($routes, $uri, 'GET')->parameters)->toBe(['value' => $captures['value']]);
+                } else {
+                    expect(fn () => $routes->match($routes, $uri, 'GET'))->toThrow(RouteNotFoundException::class);
+                }
+            }
+        }
+    }
+})->with([
+    'a(*MARK:[)b',
+    'a(*MARK:{)b',
+    'a(*MARK:[}=< >)b',
+    'a(*:foo[)b',
+    'a(*PRUNE:[)b',
+    'a(*SKIP:{)b',
+    'a(*THEN:[)b',
+    'a(*COMMIT:{)b',
+    'a(*MARK:a\)b',
+    "a(?C'[')b",
+    "a(?C')')b",
+    "a(?C'{)[]}')b",
+    'a(?C"{[)")b',
+    "a(?C'{''[)')b",
+    'a(?C{[)})b',
+    'a(?C{}}[)})b',
+    'a(?C^ [)^)b',
+    'a(?C% [)%)b',
+    'a(?C$ [)$)b',
+    'a(?C^a^^b^)b',
+    'a(*MARK:foo[)b|c',
+    'a(?C"[}")b|c',
+    'a(?C1)b',
+    'a(*pla:b)b',
+    'a(*napla:b)b',
+    'a(?:[b])',
+    'a(?=b)b',
+    'a(?C)b',
+    'a(*MARK:label)b',
+]);
