@@ -85,7 +85,8 @@ final class RouteLocator implements RouteLocatorInterface
 
         self::validateRoutesVarName($this->routesVarName);
         $routes = new Routes($this->compiler);
-        $context[$this->routesVarName] = $routes;
+        // Replace the slot without assigning through a caller-owned reference.
+        $context = [$this->routesVarName => $routes] + $context;
 
         // The source may intentionally replace the route collection. Context
         // variables must not replace the loader's own arguments.

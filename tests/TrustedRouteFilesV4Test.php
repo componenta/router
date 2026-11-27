@@ -97,3 +97,25 @@ it('does not validate an unused source variable name when loading a standalone c
         unlink($file);
     }
 });
+
+
+it('injects the collection without modifying caller-owned context references', function (string $name, bool $aliased): void {
+    $file = tempnam(sys_get_temp_dir(), 'router_context_reference_');
+    if ($file === false) { throw new RuntimeException('Cannot create fixture.'); }
+    try {
+        file_put_contents($file, '<?php $' . $name . '->addRoute(\Componenta\Http\Router\RouteRecord::get("custom", "/custom", "Handler")); $other = "local";');
+        $external = 'caller';
+        $other = 'other';
+        $context = [$name => &$external, 'other' => &$other];
+        if ($aliased) { $context['other'] =& $external; }
+        $locator = new RouteLocator($file, useCache: false, routesVarName: $name);
+        $routes = $locator->getRoutes($context);
+        expect($routes->getRoute('custom')->path)->toBe('/custom')
+            ->and($external)->toBe('caller')
+            ->and($other)->toBe('other')
+            ->and($context[$name])->toBe('caller')
+            ->and($context['other'])->toBe($aliased ? 'caller' : 'other');
+    } finally {
+        unlink($file);
+    }
+})->with(['routes', 'r', 'маршруты'])->with([false, true]);
