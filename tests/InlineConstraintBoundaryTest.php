@@ -372,4 +372,52 @@ it('rejects obsolete artifacts after the inline option-scope parsing corrections
     $map['version'] = $version;
     $map = \Componenta\Http\Router\Internal\PreparedMap::seal($map);
     expect(CompiledRoutes::tryFromArray($map))->toBeNull();
-})->with([18, 19]);
+})->with([18, 19, 20]);
+
+
+it('preserves literal braces inside regex groups without hiding their closing parentheses', function (string $token): void {
+    foreach ([false, true] as $optional) {
+        $marker = $optional ? '?' : '';
+        foreach ([
+            '/items/{value:' . $token . $marker . '}',
+            '/items/[' . $marker . 'value:' . $token . ']',
+            '/items/<value:' . $token . $marker . '>',
+            '/items/:value(' . $token . ')' . $marker,
+        ] as $pattern) {
+            $source = (new Routes())->addRoute(RouteRecord::get('item', $pattern, 'H'));
+            $compiled = $source->compiler->compile($pattern);
+            expect($compiled->tokens['value'])->toBe($token)
+                ->and(array_key_exists('value', $compiled->optionalParameters))->toBe($optional);
+            $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+            $capture = '(?P<value>' . $token . ')';
+            $oracle = '#\A(?:/items' . ($optional ? '(?:/' . $capture . ')?' : '/' . $capture) . ')\z#';
+
+            foreach (['/items', '/items/', '/items/abc', '/items/a{b', '/items/a}b', '/items/aa', '/items/ab', '/items/123'] as $uri) {
+                $matched = preg_match($oracle, $uri, $captures, PREG_UNMATCHED_AS_NULL);
+                expect($matched)->not->toBeFalse();
+                foreach ([$source, $prepared] as $routes) {
+                    if ($matched === 1) {
+                        $value = $captures['value'];
+                        expect($routes->match($routes, $uri, 'GET')->parameters)
+                            ->toBe($value === null ? [] : ['value' => $value]);
+                    } else {
+                        expect(fn () => $routes->match($routes, $uri, 'GET'))->toThrow(RouteNotFoundException::class);
+                    }
+                }
+            }
+            foreach ([$source, $prepared] as $routes) {
+                expect($routes->generate($routes, 'item', ['value' => 'abc']))->toBe('/items/abc');
+                if ($optional) {
+                    expect($routes->generate($routes, 'item'))->toBe('/items');
+                }
+            }
+        }
+    }
+})->with([
+    'literal opening brace in nested negative lookahead' => ['(?!(?:a{b))[a-z]+'],
+    'literal opening brace in an alternative' => ['(?:a{b|abc)'],
+    'literal closing brace in an alternative' => ['(?:a}b|abc)'],
+    'quantifier and nested groups' => ['(?:(?:a{1,2})bc|abc)'],
+    'braced escape' => ['(?:\x{61}bc)'],
+    'scoped options and literal opening brace' => ['(?i:a{b|abc)'],
+]);

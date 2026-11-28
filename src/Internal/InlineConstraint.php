@@ -97,7 +97,11 @@ final class InlineConstraint
                     continue;
                 }
             }
-            if ($char === '(' || $char === '{') {
+            // A regex group already shields template delimiters. Braces
+            // inside it may be literal PCRE characters, not a nested group:
+            // an unmatched literal opening brace must not hide its closing ')'.
+            // Retain top-level brace handling for the inline template grammar.
+            if ($char === '(' || ($char === '{' && ($stack === [] || end($stack)[0] !== ')'))) {
                 $stack[] = [$char === '(' ? ')' : '}', $extendedMore];
             } elseif ($stack !== [] && end($stack)[0] === $char) {
                 [, $previousMode] = array_pop($stack);
