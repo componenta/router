@@ -8,6 +8,8 @@ use RuntimeException;
 use Componenta\Http\Router\Compiler;
 use Componenta\Http\Router\CompiledRoutes;
 use Componenta\Http\Router\Contract\CompilerInterface;
+use Componenta\Http\Router\Contract\GeneratorInterface;
+use Componenta\Http\Router\Contract\MatcherInterface;
 use Componenta\Http\Router\Contract\RouteCollectorInterface;
 use Componenta\Http\Router\Exception\UnsupportedRouteCacheException;
 use Componenta\Http\Router\HttpMethod;
@@ -65,6 +67,14 @@ final class RouteCacheGenerator
     {
         if (!$this->compiler instanceof Compiler) {
             throw new UnsupportedRouteCacheException('Route compiler cannot be preserved in a cache; use the original route source.');
+        }
+
+        // The default runtime delegates matching and generation to collections
+        // that implement these contracts. A map of records alone cannot retain
+        // behavior supplied by a third-party implementation.
+        if (!$routes instanceof Routes && !$routes instanceof CompiledRoutes
+            && ($routes instanceof MatcherInterface || $routes instanceof GeneratorInterface)) {
+            throw new UnsupportedRouteCacheException('Custom route collection matching or generation cannot be preserved in a cache; use the original route source.');
         }
 
         $explicitSyntax = ($routes instanceof Routes || $routes instanceof CompiledRoutes) ? $routes->syntax : null;
