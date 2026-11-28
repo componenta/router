@@ -35,6 +35,40 @@ final class Routes implements RouteCollectorInterface, MatcherInterface, Generat
         $this->groups = new GroupCollector();
     }
 
+    public function __clone(): void
+    {
+        // Group handles register routes in their owning collection. Rebind
+        // them, including their parent links, rather than sharing the registry.
+        $original = $this->groups;
+        $this->groups = new GroupCollector();
+        $copied = new \SplObjectStorage();
+        foreach ($original as $group) {
+            $this->groups->add($this->copyGroup($group, $copied));
+        }
+        // Effective records and the immutable source index may remain shared.
+    }
+
+    /** @param \SplObjectStorage<RouteGroup, RouteGroup> $copied */
+    private function copyGroup(RouteGroup $group, \SplObjectStorage $copied): RouteGroup
+    {
+        if (isset($copied[$group])) {
+            return $copied[$group];
+        }
+
+        $parent = $group->parent === null ? null : $this->copyGroup($group->parent, $copied);
+        $copy = new RouteGroup(
+            routes: $this,
+            name: $group->name,
+            prefix: $group->prefix,
+            middleware: $group->middleware ?? [],
+            tokens: $group->tokens,
+            defaults: $group->defaults,
+            parent: $parent,
+        );
+        $copied[$group] = $copy;
+        return $copy;
+    }
+
     /** Register a source definition, applying its named group exactly once. */
     public function addRoute(RouteRecord $route): self
     {

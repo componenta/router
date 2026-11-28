@@ -115,6 +115,8 @@ Explicit `tokens` override inline tokens. Explicit `defaults` override inline de
 
 `RouteGroup` applies name prefix, path prefix, middleware, tokens, and defaults to child routes.
 
+Cloning a `Routes` collection creates a separate group registry and rebinds all group handles and parent links to the copy. Existing immutable route records and runtime handler objects retain their identity; registering a new route or group in either collection does not change the other.
+
 ```php
 $routes = new Routes();
 

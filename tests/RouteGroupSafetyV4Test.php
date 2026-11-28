@@ -68,3 +68,51 @@ it('rejects invalid group configuration before registering a group', function ()
         ->toThrow(InvalidArgumentException::class);
     expect($source->groups->has('invalid'))->toBeFalse();
 });
+
+
+it('keeps cloned route collections and their nested group handles independent', function (bool $warm): void {
+    $source = new Routes();
+    $api = $source->group('api', '/api', middleware: ['api'], defaults: ['scope' => 'read']);
+    $admin = $api->group('admin', '/admin', middleware: ['auth'], tokens: ['id' => '[A-Z]+']);
+    $admin->get('existing', '/existing/{id}', 'Handler');
+
+    if ($warm) {
+        expect($source->match($source, '/api/admin/existing/ABC', 'GET')->name)->toBe('api.admin.existing');
+    }
+
+    $copy = clone $source;
+    $copiedApi = $copy->groups->get('api');
+    $copiedAdmin = $copy->groups->get('api.admin');
+
+    expect($copy->groups)->not->toBe($source->groups)
+        ->and($copiedApi)->not->toBe($api)
+        ->and($copiedAdmin)->not->toBe($admin)
+        ->and($copiedAdmin->parent)->toBe($copiedApi)
+        ->and($copy->getRoute('api.admin.existing'))->toBe($source->getRoute('api.admin.existing'));
+
+    $copiedAdmin->get('copy', '/copy/{id}', 'Handler');
+    $copiedApi->group('copy-only', '/copy-only')->get('home', '/', 'Handler');
+    $copy->group('separate', '/separate')->get('home', '/', 'Handler');
+    $admin->get('original', '/original/{id}', 'Handler');
+
+    expect($source->has('api.admin.copy'))->toBeFalse()
+        ->and($source->groups->has('api.copy-only'))->toBeFalse()
+        ->and($source->groups->has('separate'))->toBeFalse()
+        ->and($copy->has('api.admin.original'))->toBeFalse()
+        ->and($source)->toHaveCount(2)
+        ->and($copy)->toHaveCount(4);
+
+    foreach ([$copy, CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($copy))] as $routes) {
+        $match = $routes->match($routes, '/api/admin/copy/ABC', 'GET');
+        expect($match->parameters)->toBe(['scope' => 'read', 'id' => 'ABC'])
+            ->and($match->middlewares?->toArray())->toBe(['api', 'auth'])
+            ->and($routes->generate($routes, 'api.admin.copy', ['id' => 'ABC']))->toBe('/api/admin/copy/ABC')
+            ->and($routes->match($routes, '/api/copy-only', 'GET')->name)->toBe('api.copy-only.home')
+            ->and($routes->match($routes, '/separate', 'GET')->name)->toBe('separate.home')
+            ->and(fn () => $routes->match($routes, '/api/admin/original/ABC', 'GET'))
+            ->toThrow(\Componenta\Http\Router\Exception\RouteNotFoundException::class);
+    }
+    expect($source->match($source, '/api/admin/original/ABC', 'GET')->name)->toBe('api.admin.original')
+        ->and(fn () => $source->match($source, '/api/admin/copy/ABC', 'GET'))
+        ->toThrow(\Componenta\Http\Router\Exception\RouteNotFoundException::class);
+})->with(['cold' => false, 'warm' => true]);
