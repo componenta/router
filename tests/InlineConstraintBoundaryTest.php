@@ -372,7 +372,7 @@ it('rejects obsolete artifacts after the inline option-scope parsing corrections
     $map['version'] = $version;
     $map = \Componenta\Http\Router\Internal\PreparedMap::seal($map);
     expect(CompiledRoutes::tryFromArray($map))->toBeNull();
-})->with([18, 19, 20]);
+})->with([18, 19, 20, 21]);
 
 
 it('preserves literal braces inside regex groups without hiding their closing parentheses', function (string $token): void {
@@ -420,4 +420,55 @@ it('preserves literal braces inside regex groups without hiding their closing pa
     'quantifier and nested groups' => ['(?:(?:a{1,2})bc|abc)'],
     'braced escape' => ['(?:\x{61}bc)'],
     'scoped options and literal opening brace' => ['(?i:a{b|abc)'],
+]);
+
+
+it('keeps top-level literal braces inside colon constraints without consuming subsequent path segments', function (string $token): void {
+    foreach (['' => [false, null], '?' => [true, null], '=abc' => [true, 'abc'], '?=abc' => [true, 'abc']] as $suffix => [$optional, $default]) {
+        $pattern = '/items/:value(' . $token . ')' . $suffix . '/tail/:id';
+        $source = (new Routes())->addRoute(RouteRecord::get('item', $pattern, 'H'));
+        $compiled = $source->compiler->compile($pattern);
+        expect($compiled->tokens['value'])->toBe($token)
+            ->and(array_key_exists('value', $compiled->optionalParameters))->toBe($optional)
+            ->and($compiled->defaults['value'] ?? null)->toBe($default);
+
+        $prepared = CompiledRoutes::fromArray((new RouteCacheGenerator())->compile($source));
+        $capture = '(?P<value>' . $token . ')';
+        $oracle = '#\A(?:/items' . ($optional ? '(?:/' . $capture . ')?' : '/' . $capture) . '/tail/(?P<id>\d+))\z#';
+
+        foreach (['/items/abc/tail/42', '/items/a{b/tail/42', '/items/a}b/tail/42',
+            '/items/a{b}c/tail/42', '/items/aabc/tail/42', '/items/tail/42',
+            '/items/xyz/tail/42', '/items/abc/tail/xyz', '/items/abc/tail/42/extra'] as $uri) {
+            $matched = preg_match($oracle, $uri, $captures, PREG_UNMATCHED_AS_NULL);
+            expect($matched)->not->toBeFalse();
+            foreach ([$source, $prepared] as $routes) {
+                if ($matched === 1) {
+                    $match = $routes->match($routes, $uri, 'GET');
+                    expect($match->name)->toBe('item')
+                        ->and($match->parameters['id'])->toBe(42)
+                        ->and($match->parameters['value'] ?? null)->toBe($captures['value'] ?? $default);
+                } else {
+                    expect(fn () => $routes->match($routes, $uri, 'GET'))->toThrow(RouteNotFoundException::class);
+                }
+            }
+        }
+
+        foreach ([$source, $prepared] as $routes) {
+            expect($routes->generate($routes, 'item', ['value' => 'abc', 'id' => 42]))->toBe('/items/abc/tail/42');
+            if ($optional) {
+                expect($routes->generate($routes, 'item', ['id' => 42]))
+                    ->toBe($default === null ? '/items/tail/42' : '/items/abc/tail/42');
+            }
+        }
+    }
+})->with([
+    'literal opening brace' => ['a{b|abc'],
+    'literal closing brace' => ['a}b|abc'],
+    'paired literal braces' => ['a{b}c|abc'],
+    'escaped brace' => ['a\{b|abc'],
+    'quantifier' => ['a{1,2}bc'],
+    'braced escape' => ['\x{61}bc'],
+    'group containing literal brace' => ['(?:a{b|abc)'],
+    'class containing closing parenthesis' => ['a[)]bc|abc'],
+    'quoted braces and parenthesis' => ['a\Q){}\Ebc|abc'],
 ]);

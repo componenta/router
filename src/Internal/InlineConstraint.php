@@ -43,7 +43,13 @@ final class InlineConstraint
      * Locate a delimiter outside escaped characters, character classes and
      * balanced regex groups. PCRE itself validates the resulting expression.
      */
-    public static function findOutside(string $text, int $offset, string $delimiters, bool $last = false): int|false
+    public static function findOutside(
+        string $text,
+        int $offset,
+        string $delimiters,
+        bool $last = false,
+        bool $balanceBraces = true,
+    ): int|false
     {
         $length = strlen($text);
         $stack = [];
@@ -100,8 +106,9 @@ final class InlineConstraint
             // A regex group already shields template delimiters. Braces
             // inside it may be literal PCRE characters, not a nested group:
             // an unmatched literal opening brace must not hide its closing ')'.
-            // Retain top-level brace handling for the inline template grammar.
-            if ($char === '(' || ($char === '{' && ($stack === [] || end($stack)[0] !== ')'))) {
+            // Bracket templates retain top-level brace handling to protect
+            // their delimiters. Colon constraints end at a parenthesis instead.
+            if ($char === '(' || ($balanceBraces && $char === '{' && ($stack === [] || end($stack)[0] !== ')'))) {
                 $stack[] = [$char === '(' ? ')' : '}', $extendedMore];
             } elseif ($stack !== [] && end($stack)[0] === $char) {
                 [, $previousMode] = array_pop($stack);
@@ -327,7 +334,7 @@ final class InlineConstraint
         $constraint = $default = null;
         $optional = false;
         if (($text[$end] ?? '') === '(') {
-            $close = self::findOutside($text, $end + 1, ')');
+            $close = self::findOutside($text, $end + 1, ')', balanceBraces: false);
             if ($close === false || $close === $end + 1) {
                 throw new InvalidArgumentException('Invalid inline constraint for route parameter: ' . $name);
             }
